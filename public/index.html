@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1b1d21">
+<title>OIOIOI</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800&family=Barlow:wght@400;600&display=swap">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+/* Layout: full-screen map, status strip on top, one huge flag button at the bottom for a driver's thumb. */
+:root {
+  --asphalt: #1b1d21; --panel: #25282e; --line: #3a3e46; --text: #f2f0e8; --muted: #a9adb5;
+  --sign: #ffcc00; --danger: #e5322d; --ok: #3fae5a;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif; --body: "Barlow", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--asphalt); color: var(--text); font: 16px/1.4 var(--body); overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--sign); outline-offset: 2px; }
+#map { position: fixed; inset: 0; background: #2b2e33; }
+
+.bar { position: fixed; z-index: 500; left: 0; right: 0; top: 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  display: flex; gap: 8px; align-items: center; background: linear-gradient(var(--asphalt) 60%, transparent); }
+.brand { font: 800 26px/1 var(--display); letter-spacing: .02em; color: var(--sign); margin-right: auto; }
+.chip { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.chip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.chip.on .dot { background: var(--ok); box-shadow: 0 0 0 4px rgb(63 174 90 / .25); }
+.chip.hot .dot { background: var(--danger); }
+#level { width: 46px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+#level i { display: block; height: 100%; width: 0; background: var(--sign); }
+
+#warn { position: fixed; z-index: 600; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 60px);
+  background: var(--sign); color: #111; border-radius: 10px; padding: 12px 16px; font: 800 24px/1.1 var(--display); text-transform: uppercase; letter-spacing: .03em; }
+
+.dock { position: fixed; z-index: 500; left: 0; right: 0; bottom: 0;
+  padding: 12px max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 14px) max(12px, env(safe-area-inset-left, 0px));
+  display: grid; grid-template-columns: 64px 1fr 64px; gap: 10px; align-items: end; background: linear-gradient(transparent, var(--asphalt) 40%); }
+.round { width: 64px; height: 64px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); font-size: 13px; font-weight: 600; display: grid; place-items: center; }
+.round.active { background: var(--ok); color: #08130b; border-color: transparent; }
+#flag { height: 96px; border-radius: 48px; background: var(--danger); color: #fff; font: 800 34px/1 var(--display); letter-spacing: .04em; text-transform: uppercase; box-shadow: 0 6px 24px rgb(229 50 45 / .45); }
+#flag:active { transform: scale(.98); }
+
+.sheet { position: fixed; z-index: 700; inset: auto 0 0 0; max-height: 88%; overflow: auto; background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
+  padding: 18px max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 18px) max(16px, env(safe-area-inset-left, 0px)); }
+.sheet h2 { font: 800 28px/1.1 var(--display); margin: 0 0 4px; text-wrap: balance; }
+.sheet p { margin: 0; color: var(--muted); }
+.stack { display: grid; gap: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { background: var(--line); border-radius: 10px; padding: 12px 16px; font-weight: 600; }
+.btn.primary { background: var(--sign); color: #111; }
+.btn.red { background: var(--danger); color: #fff; }
+.btn.green { background: var(--ok); color: #08130b; }
+.btn.grow { flex: 1; }
+.types button { background: var(--asphalt); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.types button[aria-pressed="true"] { background: var(--sign); color: #111; border-color: var(--sign); }
+.count { font: 800 64px/1 var(--display); color: var(--sign); font-variant-numeric: tabular-nums; }
+label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+input, select, textarea { font: inherit; color: var(--text); background: var(--asphalt); border: 1px solid var(--line); border-radius: 8px; padding: 10px; width: 100%; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.section-label { font: 600 13px/1 var(--body); text-transform: uppercase; letter-spacing: .08em; color: var(--sign); margin-top: 6px; }
+pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding: 14px; border-radius: 8px; font: 14px/1.45 ui-monospace, Menlo, monospace; margin: 0; }
+.toast { position: fixed; z-index: 800; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 130px); background: var(--text); color: var(--asphalt); padding: 10px 16px; border-radius: 8px; font-weight: 600; max-width: calc(100% - 32px); }
+
+/* Leaflet popup in the app palette */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+.leaflet-popup-content { margin: 12px 14px; font: 15px/1.4 var(--body); }
+.leaflet-popup-content h3 { font: 800 22px/1 var(--display); margin: 0 0 4px; text-transform: capitalize; }
+.leaflet-popup-content img { border-radius: 6px; margin: 6px 0; }
+.pop-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.pop-actions .btn { padding: 8px 10px; font-size: 14px; }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+.hz { width: 34px; height: 34px; }
+.me { width: 18px; height: 18px; border-radius: 50%; background: #3b82f6; border: 3px solid #fff; box-shadow: 0 0 0 6px rgb(59 130 246 / .25); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Hazard map"></div>
+
+<header class="bar">
+  <div class="brand">¡OIOIOI!</div>
+  <span class="chip" id="gpsChip"><span class="dot"></span><span id="gpsText">GPS off</span></span>
+  <span class="chip" id="micChip"><span class="dot"></span><span id="micText">Mic off</span><span id="level"><i></i></span></span>
+</header>
+
+<div id="warn" hidden role="alert"></div>
+
+<nav class="dock">
+  <button class="round" id="listenBtn" aria-pressed="false">Drive</button>
+  <button id="flag" aria-label="Flag a hazard at my location">Flag hazard</button>
+  <button class="round" id="menuBtn">Menu</button>
+</nav>
+
+<!-- Confirm-a-flag sheet: auto-saves after a countdown so a driver never has to touch it -->
+<section class="sheet" id="confirmSheet" hidden aria-labelledby="confirmTitle">
+  <div class="stack">
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <div><h2 id="confirmTitle">Hazard flagged</h2><p id="confirmWhere">Saving at your location</p></div>
+      <div class="count" id="countdown">5</div>
+    </div>
+    <div class="row types" id="typeRow" role="group" aria-label="Hazard type"></div>
+    <div class="row">
+      <label class="btn" for="photoInput" style="display:inline-block;color:var(--text)">Add photo</label>
+      <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+      <span id="photoName" style="align-self:center;color:var(--muted)"></span>
+    </div>
+    <div class="row">
+      <button class="btn red grow" id="cancelFlag">Cancel</button>
+      <button class="btn primary grow" id="saveFlag">Save now</button>
+    </div>
+  </div>
+</section>
+
+<!-- Menu: profile, scream, export -->
+<section class="sheet" id="menuSheet" hidden aria-labelledby="menuTitle">
+  <div class="stack">
+    <div class="row" style="justify-content:space-between;align-items:center"><h2 id="menuTitle">Settings</h2><button class="btn" data-close>Close</button></div>
+
+    <div class="section-label">Your trigger</div>
+    <p>Record the shout you want to use. While driving, OIOIOI listens for a loud sound that matches it. You can also say a word like "bache", "pothole" or "oioioi".</p>
+    <div class="row">
+      <button class="btn primary" id="recordScream">Record my shout (3 s)</button>
+      <span id="screamInfo" style="align-self:center;color:var(--muted)"></span>
+    </div>
+    <label>Listen for
+      <select id="triggerMode">
+        <option value="shout">My recorded shout</option>
+        <option value="words">Spoken words (uses speech recognition)</option>
+        <option value="both">Both</option>
+      </select>
+    </label>
+
+    <div class="section-label">Your details for reports</div>
+    <p>Kept only on this phone. Used to fill in the claim report you send to the authorities.</p>
+    <form id="profileForm" class="grid2">
+      <label>Full name<input id="p_name" autocomplete="name"></label>
+      <label>Driver's license no.<input id="p_license"></label>
+      <label style="grid-column:1/-1">Address<input id="p_address" autocomplete="street-address"></label>
+      <label>Car make<input id="p_make"></label>
+      <label>Model<input id="p_model"></label>
+      <label>Year<input id="p_year" inputmode="numeric"></label>
+      <label>Plate<input id="p_plate"></label>
+      <button class="btn primary" type="submit" style="grid-column:1/-1">Save details</button>
+    </form>
+
+    <div class="section-label">Share the map</div>
+    <p>KML opens in Google My Maps and Google Earth. GeoJSON loads in QGIS, ArcGIS and most public GIS tools.</p>
+    <div class="row">
+      <a class="btn" href="api/export.kml" download="oioioi-hazards.kml" style="color:inherit;text-decoration:none">Download KML</a>
+      <a class="btn" href="api/export.geojson" download="oioioi-hazards.geojson" style="color:inherit;text-decoration:none">Download GeoJSON</a>
+    </div>
+    <label><span><input type="checkbox" id="placeByTap" style="width:auto"> Place flags by tapping the map (for testing without GPS)</span></label>
+  </div>
+</section>
+
+<!-- Generated claim report -->
+<section class="sheet" id="reportSheet" hidden aria-labelledby="reportTitle">
+  <div class="stack">
+    <div class="row" style="justify-content:space-between;align-items:center"><h2 id="reportTitle">Claim report</h2><button class="btn" data-close>Close</button></div>
+    <pre class="report" id="reportText"></pre>
+    <div class="row"><button class="btn primary grow" id="copyReport">Copy</button><button class="btn grow" id="shareReport">Share</button></div>
+  </div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const TYPES = { pothole: 'Pothole', debris: 'Debris', flooding: 'Flooding', accident: 'Accident', other: 'Other danger' };
+const WORDS = /\b(bache|hoyo|pothole|oi ?oi ?oi|ay ay ay|peligro|danger|hazard)\b/i;
+const WARN_RADIUS_M = 200, DEDUPE_RADIUS_M = 25, AUTO_SAVE_S = 5;
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('oioioi.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('oioioi.' + k, JSON.stringify(v)); } catch {} },
+};
+let uid = store.get('uid');
+if (!uid) { uid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); store.set('uid', uid); }
+
+// ---------- helpers ----------
+function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
+function say(text) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = /[áéíóúñ¡]/i.test(text) ? 'es-PR' : 'en-US'; speechSynthesis.speak(u); } catch {} }
+let actx;
+function beep(freq = 880, ms = 160) {
+  try { actx = actx || new AudioContext(); const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.value = freq; g.gain.value = .2; o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + ms / 1000); } catch {}
+}
+function distM(a, b) {
+  const R = 6371e3, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function bearing(a, b) {
+  const r = Math.PI / 180, y = Math.sin((b.lng - a.lng) * r) * Math.cos(b.lat * r);
+  const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lng - a.lng) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+const votes = (m) => Object.values(m || {}).filter((t) => t > 0).length;
+const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+async function api(path, body) {
+  const r = await fetch('api/' + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid, ...body }) } : {});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+}
+
+// ---------- map ----------
+const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([18.2208, -66.5901], 9); // Puerto Rico
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+const flagSvg = (fixed) => `<svg class="hz" viewBox="0 0 34 34" aria-hidden="true">
+  <circle cx="17" cy="17" r="15" fill="${fixed ? '#8a8f98' : '#ffcc00'}" stroke="#1b1d21" stroke-width="2"/>
+  <path d="M12 26V8" stroke="#1b1d21" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M13 8h11l-3 4 3 4H13z" fill="${fixed ? '#d9dbe0' : '#e5322d'}" stroke="#1b1d21" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+const icon = (fixed) => L.divIcon({ className: '', html: flagSvg(fixed), iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -16] });
+const meMarker = L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [18, 18] }), interactive: false });
+
+let hazards = [];
+const markers = new Map();
+function render() {
+  const seen = new Set();
+  for (const h of hazards) {
+    seen.add(h.id);
+    const fixed = h.status === 'fixed';
+    let m = markers.get(h.id);
+    if (!m) { m = L.marker([h.lat, h.lng]).addTo(map); markers.set(h.id, m); m.on('popupopen', () => m.setPopupContent(popupHtml(hazards.find((x) => x.id === h.id)))); }
+    if (m._fixed !== fixed) { m.setIcon(icon(fixed)); m.setZIndexOffset(fixed ? -100 : 100); m._fixed = fixed; }
+    if (!m.getPopup()) m.bindPopup(() => popupHtml(hazards.find((x) => x.id === h.id)), { maxWidth: 260 });
+    else if (m.isPopupOpen()) m.setPopupContent(popupHtml(h));
+  }
+  for (const [id, m] of markers) if (!seen.has(id)) { m.remove(); markers.delete(id); }
+}
+function popupHtml(h) {
+  const mine = h.reporters?.[uid] > 0, cleared = h.clears?.[uid] > 0;
+  return `<h3>${esc(TYPES[h.type] || h.type)}</h3>
+    <div>${h.status === 'fixed' ? '<b>Marked fixed</b>' : '<b style="color:var(--sign)">Active</b>'} · ${votes(h.reporters)} reporter${votes(h.reporters) === 1 ? '' : 's'} · ${votes(h.clears)} say fixed</div>
+    <div style="color:var(--muted);font-size:13px">Reported ${new Date(h.createdAt).toLocaleString()}</div>
+    ${h.hasPhoto ? `<img src="api/photos/${h.id}" alt="Photo of the hazard">` : ''}
+    <div class="pop-actions">
+      <button class="btn primary" onclick="vote('${h.id}','confirm')" ${mine && !cleared ? 'disabled' : ''}>${mine && !cleared ? 'You reported it' : 'Still there'}</button>
+      <button class="btn green" onclick="vote('${h.id}','clear')" ${cleared ? 'disabled' : ''}>${cleared ? 'You said fixed' : "It's fixed"}</button>
+      <button class="btn" onclick="showReport('${h.id}')">Claim report</button>
+    </div>`;
+}
+async function refresh() {
+  try { hazards = await api('hazards'); render(); checkAhead(); } catch (e) { console.warn('refresh failed', e); }
+}
+async function vote(id, action) {
+  try {
+    const h = await api(`hazards/${id}/${action}`, {});
+    hazards = hazards.map((x) => (x.id === id ? h : x)); render();
+    toast(action === 'clear' ? (h.status === 'fixed' ? 'Marked as fixed' : 'Your "fixed" vote was counted') : 'Added you to the reporters');
+  } catch (e) { toast('Could not save: ' + e.message); }
+}
+window.vote = vote;
+
+// ---------- location ----------
+let pos = null, watchId = null, centered = false;
+function startGps() {
+  if (!('geolocation' in navigator)) { $('gpsText').textContent = 'No GPS'; return; }
+  if (watchId != null) return;
+  watchId = navigator.geolocation.watchPosition((p) => {
+    pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, heading: p.coords.heading, speed: p.coords.speed };
+    $('gpsChip').classList.add('on'); $('gpsText').textContent = `GPS ±${Math.round(pos.acc)} m`;
+    meMarker.setLatLng([pos.lat, pos.lng]).addTo(map);
+    if (!centered) { map.setView([pos.lat, pos.lng], 16); centered = true; }
+    else if (listening) map.panTo([pos.lat, pos.lng], { animate: true });
+    checkAhead();
+  }, (err) => { $('gpsChip').classList.remove('on'); $('gpsText').textContent = err.code === 1 ? 'GPS blocked' : 'No GPS fix'; },
+  { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+}
+
+// Warn about active hazards close by and roughly ahead (when moving with a heading).
+const warned = store.get('warned', {});
+function checkAhead() {
+  if (!pos) return;
+  let best = null;
+  for (const h of hazards) {
+    if (h.status !== 'active') continue;
+    const d = distM(pos, h);
+    if (d > WARN_RADIUS_M) continue;
+    if (pos.speed > 3 && Number.isFinite(pos.heading)) {
+      const diff = Math.abs(((bearing(pos, h) - pos.heading + 540) % 360) - 180);
+      if (diff > 50) continue;
+    }
+    if (!best || d < best.d) best = { h, d };
+  }
+  const w = $('warn');
+  if (!best) { w.hidden = true; return; }
+  w.hidden = false;
+  w.textContent = `${TYPES[best.h.type] || 'Hazard'} ahead · ${Math.round(best.d)} m`;
+  const last = warned[best.h.id] || 0;
+  if (Date.now() - last > 10 * 60e3) {
+    warned[best.h.id] = Date.now(); store.set('warned', warned);
+    beep(660, 120); setTimeout(() => beep(660, 120), 200);
+    say(`${TYPES[best.h.type] || 'Hazard'} ahead, ${Math.round(best.d / 10) * 10} meters`);
+  }
+}
+
+// ---------- flagging ----------
+let pending = null, countdownT = null;
+function openFlag(source, at) {
+  if (pending) return;
+  if (!pos && !at) { toast('Waiting for GPS. Turn on location, or enable "place by tapping" in Menu.'); startGps(); return; }
+  const c = at || pos;
+  pending = { lat: c.lat, lng: c.lng, accuracy: at ? null : pos.acc, heading: at ? null : pos.heading, type: 'pothole', photo: null };
+  beep(1040, 200);
+  if (source !== 'button') say('Bache marcado. Guardando en cinco segundos.');
+  $('confirmWhere').textContent = at ? 'Where you tapped (testing mode)' : `At your location (±${Math.round(pos.acc)} m)`;
+  $('photoName').textContent = '';
+  renderTypes();
+  $('confirmSheet').hidden = false;
+  let n = AUTO_SAVE_S; $('countdown').textContent = n;
+  countdownT = setInterval(() => { n--; $('countdown').textContent = n; if (n <= 0) saveFlag(); }, 1000);
+}
+function stopCountdown() { clearInterval(countdownT); countdownT = null; $('countdown').textContent = '–'; }
+function renderTypes() {
+  $('typeRow').innerHTML = Object.entries(TYPES).map(([k, v]) => `<button aria-pressed="${pending.type === k}" data-type="${k}">${v}</button>`).join('');
+}
+$('typeRow').addEventListener('click', (e) => { const k = e.target.dataset.type; if (!k) return; pending.type = k; stopCountdown(); renderTypes(); });
+$('photoInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f || !pending) return;
+  stopCountdown();
+  pending.photo = await shrink(f); $('photoName').textContent = 'Photo attached';
+  e.target.value = '';
+});
+async function shrink(file) {
+  const img = await createImageBitmap(file);
+  const s = Math.min(1, 1024 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = img.width * s; c.height = img.height * s;
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', .72);
+}
+async function saveFlag() {
+  stopCountdown();
+  const p = pending; if (!p) return;
+  $('confirmSheet').hidden = true; pending = null;
+  // If someone already flagged this spot, join that report instead of duplicating it.
+  const near = hazards.find((h) => h.status === 'active' && distM(p, h) < DEDUPE_RADIUS_M);
+  try {
+    if (near) { await vote(near.id, 'confirm'); say('Ya estaba reportado. Te añadimos como reclamante.'); return; }
+    const h = await api('hazards', p);
+    hazards.push(h); render(); toast('Hazard saved'); beep(1320, 120);
+  } catch (e) { toast('Could not save: ' + e.message); say('No se pudo guardar'); }
+}
+$('saveFlag').onclick = saveFlag;
+$('cancelFlag').onclick = () => { stopCountdown(); pending = null; $('confirmSheet').hidden = true; toast('Cancelled'); };
+$('flag').onclick = () => { startGps(); openFlag('button'); };
+map.on('click', (e) => { if ($('placeByTap').checked) openFlag('button', e.latlng); });
+
+// ---------- listening: shout detector + optional speech words ----------
+let listening = false, micStream, analyser, rafId, recog, wakeLock, lastTrigger = 0;
+let scream = store.get('scream'); // { rms, profile: [bands] }
+function screamLabel() { $('screamInfo').textContent = scream ? 'Shout recorded' : 'No shout recorded yet (any very loud shout will trigger)'; }
+$('triggerMode').value = store.get('mode', 'shout');
+$('triggerMode').onchange = (e) => { store.set('mode', e.target.value); if (listening) { stopListening(); startListening(); } };
+
+const BANDS = [[200, 400], [400, 700], [700, 1000], [1000, 1500], [1500, 2200], [2200, 3200], [3200, 5000]];
+function frame(an, freq, time) {
+  an.getFloatTimeDomainData(time);
+  let sum = 0; for (const v of time) sum += v * v;
+  const rms = Math.sqrt(sum / time.length);
+  an.getFloatFrequencyData(freq);
+  const hz = an.context.sampleRate / 2 / freq.length;
+  const prof = BANDS.map(([a, b]) => { let s = 0, n = 0; for (let i = Math.floor(a / hz); i < Math.ceil(b / hz); i++) { s += 10 ** (freq[i] / 10); n++; } return s / n; });
+  const tot = prof.reduce((x, y) => x + y, 0) || 1;
+  return { rms, prof: prof.map((x) => x / tot) };
+}
+const cosine = (a, b) => { let d = 0, na = 0, nb = 0; a.forEach((x, i) => { d += x * b[i]; na += x * x; nb += b[i] * b[i]; }); return d / Math.sqrt(na * nb || 1); };
+async function openMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  actx = actx || new AudioContext(); await actx.resume();
+  analyser = actx.createAnalyser(); analyser.fftSize = 2048;
+  actx.createMediaStreamSource(micStream).connect(analyser);
+  return { freq: new Float32Array(analyser.frequencyBinCount), time: new Float32Array(analyser.fftSize) };
+}
+function closeMic() { cancelAnimationFrame(rafId); micStream?.getTracks().forEach((t) => t.stop()); micStream = null; $('level').firstElementChild.style.width = 0; }
+
+$('recordScream').onclick = async () => {
+  const wasListening = listening; if (wasListening) stopListening();
+  try {
+    const buf = await openMic(); const frames = []; const end = performance.now() + 3000;
+    $('recordScream').textContent = 'Shout now…'; beep(990, 150);
+    await new Promise((done) => { (function loop() { frames.push(frame(analyser, buf.freq, buf.time)); performance.now() < end ? (rafId = requestAnimationFrame(loop)) : done(); })(); });
+    closeMic();
+    frames.sort((a, b) => b.rms - a.rms);
+    const top = frames.slice(0, Math.max(5, Math.floor(frames.length * .15)));
+    if (top[0].rms < .05) { toast('That was too quiet. Try again, louder.'); }
+    else {
+      scream = { rms: top.reduce((s, f) => s + f.rms, 0) / top.length, profile: BANDS.map((_, i) => top.reduce((s, f) => s + f.prof[i], 0) / top.length) };
+      store.set('scream', scream); toast('Shout saved');
+    }
+  } catch (e) { toast('Microphone not available: ' + e.message); }
+  $('recordScream').textContent = 'Record my shout (3 s)'; screamLabel();
+  if (wasListening) startListening();
+};
+
+function trigger(src) {
+  if (Date.now() - lastTrigger < 8000 || pending) return;
+  lastTrigger = Date.now();
+  $('micChip').classList.add('hot'); setTimeout(() => $('micChip').classList.remove('hot'), 1500);
+  openFlag(src);
+}
+
+async function startListening() {
+  const mode = store.get('mode', 'shout');
+  listening = true; $('listenBtn').classList.add('active'); $('listenBtn').setAttribute('aria-pressed', 'true'); $('listenBtn').textContent = 'Stop';
+  startGps();
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+  if (mode !== 'words') {
+    try {
+      const buf = await openMic(); let loudFrames = 0;
+      const thresh = scream ? Math.max(.08, scream.rms * .55) : .25;
+      (function loop() {
+        const f = frame(analyser, buf.freq, buf.time);
+        $('level').firstElementChild.style.width = Math.min(100, f.rms / thresh * 100) + '%';
+        const match = !scream || cosine(f.prof, scream.profile) > .85;
+        loudFrames = f.rms > thresh && match ? loudFrames + 1 : Math.max(0, loudFrames - 1);
+        if (loudFrames > 12) { loudFrames = 0; trigger('shout'); } // ~0.2 s of sustained, matching loudness
+        rafId = requestAnimationFrame(loop);
+      })();
+    } catch (e) { toast('Microphone blocked: ' + e.message); }
+  }
+  if (mode !== 'shout') startWords();
+  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? 'Say "bache"' : 'Listening';
+  say('Escuchando. Grita para marcar un bache.');
+}
+function startWords() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Speech recognition is not supported in this browser'); return; }
+  recog = new SR(); recog.lang = 'es-PR'; recog.continuous = true; recog.interimResults = true;
+  recog.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (pending && /\b(cancel|cancela|no)\b/i.test(t)) $('cancelFlag').click(); else if (WORDS.test(t)) trigger('words'); } };
+  recog.onend = () => { if (listening && recog) try { recog.start(); } catch {} };
+  try { recog.start(); } catch {}
+}
+function stopListening() {
+  listening = false; closeMic();
+  if (recog) { const r = recog; recog = null; r.onend = null; try { r.stop(); } catch {} }
+  wakeLock?.release?.(); wakeLock = null;
+  $('listenBtn').classList.remove('active'); $('listenBtn').setAttribute('aria-pressed', 'false'); $('listenBtn').textContent = 'Drive';
+  $('micChip').classList.remove('on'); $('micText').textContent = 'Mic off';
+}
+$('listenBtn').onclick = () => (listening ? stopListening() : startListening());
+
+// ---------- profile + report ----------
+const P_FIELDS = ['name', 'license', 'address', 'make', 'model', 'year', 'plate'];
+const profile = store.get('profile', {});
+P_FIELDS.forEach((k) => ($('p_' + k).value = profile[k] || ''));
+$('profileForm').onsubmit = (e) => { e.preventDefault(); P_FIELDS.forEach((k) => (profile[k] = $('p_' + k).value.trim())); store.set('profile', profile); toast('Details saved'); };
+
+function reportText(h) {
+  const p = profile, d = new Date(h.createdAt);
+  const car = [p.make, p.model, p.year].filter(Boolean).join(' ');
+  return `REPORTE DE CONDICIÓN PELIGROSA EN LA VÍA / ROAD HAZARD REPORT
+
+Tipo / Type: ${TYPES[h.type] || h.type}
+Fecha y hora / Date & time: ${d.toLocaleString('es-PR')}
+Ubicación / Location: ${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}${h.accuracy ? ` (±${Math.round(h.accuracy)} m)` : ''}
+Mapa / Map: https://www.google.com/maps?q=${h.lat.toFixed(6)},${h.lng.toFixed(6)}
+Estado / Status: ${h.status === 'fixed' ? 'Reportado como reparado / Reported fixed' : 'Activo / Active'}
+Conductores que lo confirman / Drivers confirming: ${votes(h.reporters)}
+Foto / Photo: ${h.hasPhoto ? new URL('api/photos/' + h.id, location.href).href : 'No'}
+
+Reportado por / Reported by:
+  Nombre / Name: ${p.name || '__________'}
+  Dirección / Address: ${p.address || '__________'}
+  Licencia / License no.: ${p.license || '__________'}
+  Vehículo / Vehicle: ${car || '__________'}${p.plate ? `, tablilla / plate ${p.plate}` : ''}
+
+Identificador del reporte / Report ID: ${h.id}
+Generado con OIOIOI.`;
+}
+function showReport(id) { const h = hazards.find((x) => x.id === id); if (!h) return; map.closePopup(); $('reportText').textContent = reportText(h); $('reportSheet').hidden = false; }
+window.showReport = showReport;
+$('copyReport').onclick = async () => {
+  try { await navigator.clipboard.writeText($('reportText').textContent); toast('Report copied'); }
+  catch { const r = document.createRange(); r.selectNodeContents($('reportText')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Selected. Use your phone’s Copy.'); }
+};
+$('shareReport').onclick = async () => {
+  try { await navigator.share({ title: 'Road hazard report', text: $('reportText').textContent }); } catch (e) { if (e.name !== 'AbortError') toast('Sharing is not available here. Use Copy.'); }
+};
+
+// ---------- sheets ----------
+$('menuBtn').onclick = () => { screamLabel(); $('menuSheet').hidden = false; };
+document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => (b.closest('.sheet').hidden = true)));
+
+// ---------- boot ----------
+refresh(); setInterval(refresh, 10000);
+startGps();
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>

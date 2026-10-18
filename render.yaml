@@ -1,0 +1,10 @@
+# Render blueprint: deploys the prototype as a free Node web service.
+# Note: the free plan has no persistent disk, so flags and photos reset when the service restarts or redeploys.
+services:
+  - type: web
+    name: oioioi
+    runtime: node
+    plan: free
+    buildCommand: "true"
+    startCommand: node server.js
+    healthCheckPath: /api/hazards
