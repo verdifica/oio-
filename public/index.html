@@ -137,41 +137,30 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     <div class="row" style="justify-content:space-between;align-items:center"><h2 id="menuTitle">Settings</h2><button class="btn" data-close>Close</button></div>
 
     <div class="section-label">Your trigger</div>
-    <p>Teach OIOIOI your own "oi oi oi". Record it 3 times with the phone where it sits while you drive, saying it the way you will on the road. While driving, the app listens silently and compares every sound to your recordings. Nothing is sent anywhere.</p>
+    <p>Say <b>"oi, oi, oi"</b> with a short break between each "oi". The app listens silently with a Spanish speech recognizer that runs on the phone itself: no beeps, no internet needed, and nothing is sent anywhere. The first time, it downloads the recognizer (about 35 MB); after that it is kept on the phone.</p>
     <div class="row">
-      <button class="btn primary" id="recordScream">Record "oi oi oi"</button>
-      <button class="btn" id="playScream" disabled>Play my recording</button>
-      <button class="btn" id="testScream">Test my trigger</button>
-      <button class="btn" id="deleteScream" disabled>Delete recordings</button>
+      <button class="btn primary" id="testScream">Test my trigger</button>
     </div>
     <p id="screamInfo"></p>
     <div class="testpanel" id="testPanel" hidden>
-      <div class="stats" id="tWordRow"><span>Heard <b id="tHeard">–</b></span></div>
-      <div class="meter" id="tMeter" aria-hidden="true"><i id="tLevel"></i><b id="tThresh"></b></div>
-      <div class="stats" id="tShoutRow">
-        <span>Sound <b id="tLoud">–</b></span>
-        <span>Background <b id="tNoise">–</b></span>
-        <span>Last sound <b id="tLen">–</b></span>
-        <span>Difference <b id="tDist">–</b></span>
-      </div>
-      <div class="tresult" id="tResult" role="status">Say "oi oi oi"</div>
-      <p>Test mode never creates flags. When you stop speaking, "Difference" shows how far the sound was from your recordings; it is recognized when it turns green, below the pass mark. Practice until you see "Recognized" every time, then talk or play the radio to check it stays quiet.</p>
+      <div class="stats"><span>Heard <b id="tHeard">–</b></span></div>
+      <div class="tresult" id="tResult" role="status">Say "oi, oi, oi"</div>
+      <p>Test mode never creates flags. "Heard" shows what the recognizer understood; "hoy" counts as "oi" because they sound the same. Then talk normally or play the radio to check it stays quiet.</p>
     </div>
-    <label>Sensitivity
-      <select id="sensitivity">
-        <option value="low">Low: fewer false alarms</option>
-        <option value="medium">Medium</option>
-        <option value="high">High: accepts more variation in how you say it</option>
+    <label>How many times to say "oi"
+      <select id="oiCount">
+        <option value="3">3 times (fewer false alarms)</option>
+        <option value="2">2 times (easier, but "hoy, hoy" in a conversation could trigger it)</option>
       </select>
     </label>
-    <label>Listen for
+    <label>Listen with
       <select id="triggerMode">
-        <option value="voice">My "oi oi oi" (silent, trained on my voice)</option>
-        <option value="words">Speech recognition (the phone may beep)</option>
+        <option value="voice">Silent recognizer on the phone</option>
+        <option value="words">Google speech recognition (the phone may beep)</option>
         <option value="both">Both</option>
       </select>
     </label>
-    <label id="triggerWordLabel">Word for speech recognition
+    <label id="triggerWordLabel">Word for Google speech recognition
       <select id="triggerWord">
         <option value="oioioi">"Oi oi oi" (or "oy oy oy")</option>
         <option value="hoyo">"Hoyo"</option>
@@ -215,7 +204,6 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
 <div class="toast" id="toast" hidden></div>
 
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="kws.js"></script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -239,7 +227,8 @@ if (!uid) { uid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random(
 
 // ---------- helpers ----------
 function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
-function say(text) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = /[áéíóúñ¡]/i.test(text) ? 'es-PR' : 'en-US'; speechSynthesis.speak(u); } catch {} }
+let spokeAt = 0;
+function say(text) { spokeAt = Date.now() + 3000; try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = /[áéíóúñ¡]/i.test(text) ? 'es-PR' : 'en-US'; speechSynthesis.speak(u); } catch {} }
 let actx;
 function beep(freq = 880, ms = 160) {
   try { actx = actx || new AudioContext(); const o = actx.createOscillator(), g = actx.createGain();
@@ -427,37 +416,27 @@ $('cancelFlag').onclick = () => { stopCountdown(); pending = null; $('confirmShe
 $('flag').onclick = () => { startGps(); openFlag('button'); };
 map.on('click', (e) => { if ($('placeByTap').checked) openFlag('button', e.latlng); });
 
-// ---------- listening: personal "oi oi oi" detector + optional speech recognition ----------
+// ---------- listening: silent on-phone recognizer (Vosk) + optional Google speech recognition ----------
 let listening = false, recog, wakeLock, lastTrigger = 0, stopDetector = null, stopTest = null;
-// The user's recordings, each a list of normalized feature frames (see kws.js). Up to 5 are kept.
-let templates = store.get('oiTemplates', []) || [];
-let screamAudio = store.get('screamAudio'); // data URL of the latest recording, for playback
-const MIN_RECORDINGS = 3, MAX_RECORDINGS = 5;
 if (['shout'].includes(store.get('mode'))) store.set('mode', 'voice'); // older setting name
-function screamLabel() {
-  const n = templates.length;
-  $('screamInfo').textContent = n ? `${n} recording${n > 1 ? 's' : ''} saved.${n < MIN_RECORDINGS ? ' Record ' + (MIN_RECORDINGS - n) + ' more for reliable recognition.' : ''}` : 'No recordings yet. Record "oi oi oi" 3 times.';
-  $('playScream').disabled = !screamAudio; $('deleteScream').disabled = !n;
-  $('triggerWordLabel').hidden = store.get('mode', 'voice') === 'voice';
-}
+['oiTemplates', 'screamAudio', 'scream'].forEach((k) => { try { localStorage.removeItem('oioioi.' + k); } catch {} }); // recordings of earlier versions
+function screamLabel() { $('triggerWordLabel').hidden = store.get('mode', 'voice') === 'voice'; }
 $('triggerMode').value = store.get('mode', 'voice');
-$('triggerMode').onchange = (e) => { store.set('mode', e.target.value); screamLabel(); if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } };
+$('triggerMode').onchange = (e) => { store.set('mode', e.target.value); screamLabel(); restartListening(); };
 $('triggerWord').value = store.get('word', 'oioioi');
-$('triggerWord').onchange = (e) => { store.set('word', e.target.value); if (stopTest) { toggleTest(); toggleTest(); } };
-$('sensitivity').value = store.get('sens', 'medium');
-$('sensitivity').onchange = (e) => { store.set('sens', e.target.value); if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } };
+$('triggerWord').onchange = (e) => { store.set('word', e.target.value); restartListening(); };
+$('oiCount').value = String(store.get('oiCount', 3));
+$('oiCount').onchange = (e) => { store.set('oiCount', Number(e.target.value)); restartListening(); };
+function restartListening() { if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } }
 
-// One shared microphone for Drive, Test and Record. It is reopened only if the browser ended it,
-// and released when nothing uses it, so the next recording always gets a working microphone.
+// One shared microphone for Drive and Test, released when nothing uses it.
 let mic = null;
 async function getMic(user) {
   if (!mic || !mic.stream.getAudioTracks().some((t) => t.readyState === 'live')) {
     releaseMic(null, true);
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
     actx = actx || new AudioContext();
-    const analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
-    const src = actx.createMediaStreamSource(stream); src.connect(analyser);
-    mic = { stream, src, analyser, freq: new Float32Array(analyser.frequencyBinCount), users: new Set() };
+    mic = { stream, src: actx.createMediaStreamSource(stream), users: new Set() };
   }
   if (actx.state !== 'running') await actx.resume();
   mic.users.add(user);
@@ -471,102 +450,103 @@ function releaseMic(user, force) {
   mic.stream.getTracks().forEach((t) => t.stop());
   mic = null;
 }
-// Calls onFrame with features for every 1024 audio samples (about 21 ms). The audio processor is used
-// as a steady clock that, unlike timers, keeps its pace when the screen dims.
-function startFrames(m, onFrame) {
-  const proc = actx.createScriptProcessor(1024, 1, 1), mute = actx.createGain();
-  mute.gain.value = 0;
-  m.src.connect(proc); proc.connect(mute); mute.connect(actx.destination);
-  proc.onaudioprocess = () => { m.analyser.getFloatFrequencyData(m.freq); onFrame(KWS.features(m.freq, actx.sampleRate)); };
-  return () => { proc.onaudioprocess = null; try { m.src.disconnect(proc); } catch {} try { proc.disconnect(); mute.disconnect(); } catch {} };
-}
 
-// Listens for "oi oi oi". onInfo gets the live level and, after each burst of sound, how it scored.
-async function startDetector(user, onHit, onInfo) {
-  const mdl = KWS.model(templates, store.get('sens', 'medium'));
-  if (!mdl) throw new Error('Record "oi oi oi" first (Menu)');
-  const m = await getMic(user);
-  const seg = new KWS.Segmenter();
-  const stop = startFrames(m, (f) => {
-    const s = seg.push(f);
-    onInfo?.({ level: f.e, noise: seg.noise(), threshold: mdl.threshold });
-    if (!s) return;
-    const r = KWS.score(mdl, s);
-    onInfo?.({ level: f.e, noise: seg.noise(), threshold: mdl.threshold, result: r });
-    if (r.ok) onHit();
-  });
-  return () => { stop(); releaseMic(user); };
-}
-
-$('recordScream').onclick = async () => {
-  if (stopTest) toggleTest();
-  const btn = $('recordScream'); if (btn.disabled) return; btn.disabled = true;
-  let m = null;
-  try {
-    m = await getMic('record');
-    let rec = null; const chunks = [];
-    try { rec = new MediaRecorder(m.stream); rec.ondataavailable = (e) => chunks.push(e.data); rec.start(); } catch { rec = null; }
-    btn.textContent = 'Say "oi oi oi" now…'; beep(990, 120);
-    const frames = [];
-    await new Promise((done) => { const stop = startFrames(m, (f) => { frames.push(f); if (frames.length * 1024 / actx.sampleRate >= 3.5) { stop(); done(); } }); });
-    const audio = rec ? await new Promise((done) => { rec.onstop = () => done(new Blob(chunks, { type: rec.mimeType })); setTimeout(() => done(null), 1500); try { rec.stop(); } catch { done(null); } }) : null;
-    const t = KWS.trim(frames);
-    if (!t || t.frames.length < 12) toast('I could not hear a clear "oi oi oi". Say it louder, after the beep.', 5000);
-    else if (t.frames.length > 140) toast('That was too long. Say just "oi oi oi", then stay quiet.', 5000);
-    else {
-      templates = [...templates, KWS.normalize(t.frames, t.noise)].slice(-MAX_RECORDINGS);
-      store.set('oiTemplates', templates);
-      if (audio && audio.size < 300e3) {
-        screamAudio = await new Promise((done) => { const r = new FileReader(); r.onload = () => done(r.result); r.readAsDataURL(audio); });
-        store.set('screamAudio', screamAudio);
-      }
-      toast(templates.length < MIN_RECORDINGS ? `Recording ${templates.length} of ${MIN_RECORDINGS} saved. Record again.` : 'Recording saved. Try "Test my trigger".');
+// The recognizer and its Spanish model are loaded on first use. The model is kept in the phone's cache storage,
+// so it downloads only once.
+const MODEL_URL = 'vendor/vosk/model-es.tar.gz', MODEL_CACHE = 'oioioi-voice-model-1';
+let voskModel = null;
+function loadScript(src) { return new Promise((ok, fail) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => fail(new Error('Could not load ' + src)); document.head.append(el); }); }
+async function loadVoice(onStatus) {
+  if (voskModel) return voskModel;
+  if (!window.Vosk) { onStatus('Loading the recognizer…'); await loadScript('vendor/vosk/vosk.js'); }
+  let blob = null, cache = null;
+  try { cache = await caches.open(MODEL_CACHE); const hit = await cache.match(MODEL_URL); if (hit) blob = await hit.blob(); } catch {}
+  if (!blob) {
+    const res = await fetch(MODEL_URL);
+    if (!res.ok) throw new Error('Could not download the voice model');
+    const total = Number(res.headers.get('content-length')) || 35e6, reader = res.body.getReader(), parts = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      parts.push(value); got += value.length;
+      onStatus(`Downloading the voice model, first time only: ${Math.round(got / total * 100)}%`);
     }
-  } catch (e) { toast('Microphone not available: ' + (e.name || '') + ' ' + e.message, 6000); }
-  if (m) releaseMic('record');
-  btn.textContent = 'Record "oi oi oi"'; btn.disabled = false; screamLabel();
-};
-$('playScream').onclick = () => { if (screamAudio) new Audio(screamAudio).play().catch(() => toast('Could not play the recording')); };
-$('deleteScream').onclick = () => { templates = []; screamAudio = null; store.set('oiTemplates', []); store.set('screamAudio', null); screamLabel(); toast('Recordings deleted'); };
+    blob = new Blob(parts, { type: 'application/gzip' });
+    try { await cache?.put(MODEL_URL, new Response(blob)); } catch {}
+  }
+  onStatus('Starting the recognizer…');
+  voskModel = await Vosk.createModel(URL.createObjectURL(blob));
+  voskModel.setLogLevel(-1);
+  return voskModel;
+}
+// The recognizer only knows "oi" and these everyday words. Without them, anything that sounds a bit like "oi"
+// (hoy, voy, soy, oye…) would be heard as "oi". "Hoy" sounds exactly like "oi", so both count.
+const DECOYS = 'hoy voy soy doy estoy oye oiga oigan oír hoyo hoyos toy boy muy uy ay ahí hay oh no sí y o a e u el la los las un una de del en con por para que qué como cómo cuando dónde donde yo tú él ella nosotros ellos me te se le lo mi tu su mis nos es está están era fue ser estar tener tengo tiene vamos va van ir ver mira mirar eso esto esa este aquí allá ya ahora mañana tarde noche día bien mal más menos casa carro calle radio música mamá papá trabajo trabajar llamar hola adiós gracias señor señora todos todo nada algo mucho poco grande pequeño calor frío agua luz rojo verde vuelta derecha izquierda tráfico horrible cansado temprano pon dame dime quiero puedo sabes sé hace hacer dijo digo bueno buena claro vale pues pero porque si también tampoco siempre nunca otro otra vez hora tiempo pare sigue sigo cuidado ojo coño wow huy epa cancela cancelar'.split(' ');
+const OI = new Set(['oi', 'hoy']);
+// Longest run of "oi"/"hoy" in a row at the end of what was heard.
+function oiRun(words) { let n = 0; for (const w of words) n = OI.has(w) ? n + 1 : 0; return n; }
+
+// Listens for "oi, oi, oi". onHeard gets the words as they are recognized.
+async function startDetector(user, onHit, onHeard, onStatus = () => {}) {
+  const model = await loadVoice(onStatus);
+  const m = await getMic(user);
+  const need = store.get('oiCount', 3);
+  const rec = new model.KaldiRecognizer(actx.sampleRate, JSON.stringify(['oi', ...DECOYS, '[unk]']));
+  let heard = [], heardAt = 0, fired = false;
+  const check = (text, final) => {
+    const words = text.split(/\s+/).filter(Boolean);
+    // Ignore the app's own voice ("Hoyo marcado…", warnings) coming back through the car speakers.
+    if (speechSynthesis.speaking || Date.now() - spokeAt < 800) { if (final) heard = []; return; }
+    if (words.length) onHeard?.(words.join(' '));
+    if (pending && words.some((w) => /^cancela/.test(w))) $('cancelFlag').click();
+    // Runs may continue across recognizer results when there is a short pause between each "oi".
+    const all = [...(Date.now() - heardAt < 2500 ? heard : []), ...words];
+    if (!fired && oiRun(all) >= need) { fired = true; onHit(); }
+    if (final) { heard = fired || !words.length ? [] : all.slice(-oiRun(all)); heardAt = Date.now(); fired = false; }
+  };
+  rec.on('partialresult', (msg) => check(msg.result.partial || '', false));
+  rec.on('result', (msg) => check(msg.result.text || '', true));
+  const proc = actx.createScriptProcessor(4096, 1, 1), mute = actx.createGain(), bar = $('level').firstElementChild;
+  mute.gain.value = 0;
+  proc.onaudioprocess = (e) => {
+    try { rec.acceptWaveform(e.inputBuffer); } catch {}
+    const x = e.inputBuffer.getChannelData(0); let s = 0; for (let i = 0; i < x.length; i += 4) s += x[i] * x[i];
+    bar.style.width = Math.min(100, Math.sqrt(s / (x.length / 4)) * 400) + '%';
+  };
+  m.src.connect(proc); proc.connect(mute); mute.connect(actx.destination);
+  onStatus('');
+  return () => {
+    proc.onaudioprocess = null; bar.style.width = 0;
+    try { m.src.disconnect(proc); proc.disconnect(); mute.disconnect(); } catch {}
+    try { rec.remove(); } catch {}
+    releaseMic(user);
+  };
+}
 
 // Test mode: the same listening as Drive, but it only shows what it hears and never creates a flag.
 let hits = 0;
 async function toggleTest() {
   const label = 'Test my trigger';
-  if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = label; return; }
+  if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = label; $('screamInfo').textContent = ''; return; }
   if (listening) stopListening();
-  const mode = store.get('mode', 'voice');
+  const mode = store.get('mode', 'voice'), need = store.get('oiCount', 3);
   hits = 0; $('testPanel').hidden = false; $('testScream').textContent = 'Stop test';
-  const idle = mode === 'words' ? wordLabel() : 'Say "oi oi oi"';
-  $('tResult').textContent = idle; $('tResult').classList.remove('hit');
-  $('tWordRow').hidden = mode === 'voice'; $('tMeter').hidden = $('tShoutRow').hidden = mode === 'words'; $('tHeard').textContent = '–';
-  ['tLoud', 'tNoise', 'tLen', 'tDist'].forEach((id) => ($(id).textContent = '–'));
+  const idle = mode === 'words' ? wordLabel() : `Say "${Array(need).fill('oi').join(', ')}"`;
+  $('tResult').textContent = idle; $('tResult').classList.remove('hit'); $('tHeard').textContent = '–';
   const hit = (what) => {
     hits++; beep(1320, 150);
     $('tResult').textContent = `${what} recognized ✓ (${hits})`; $('tResult').classList.add('hit');
     clearTimeout(toggleTest.t); toggleTest.t = setTimeout(() => { $('tResult').textContent = idle; $('tResult').classList.remove('hit'); }, 1500);
   };
+  const heard = (t) => ($('tHeard').textContent = '"' + t.trim() + '"');
   const stops = [];
   stopTest = () => stops.forEach((f) => f());
-  if (mode !== 'voice') {
-    const st = startWords(() => hit('Word'), (t) => ($('tHeard').textContent = '"' + t.trim() + '"'));
-    if (st) stops.push(st);
-  }
+  if (mode !== 'voice') { const st = startWords(() => hit('Word'), heard); if (st) stops.push(st); }
   if (mode === 'words') return;
-  const pct = (db) => Math.max(0, Math.min(100, (db + 80) / 80 * 100)); // meter shows -80 to 0 dB
   try {
-    stops.push(await startDetector('test', () => hit('"Oi oi oi"'), (v) => {
-      $('tLevel').style.width = pct(v.level) + '%'; $('tThresh').style.left = pct(v.noise + 6) + '%';
-      $('tLevel').style.background = v.level > v.noise + 6 ? 'var(--ok)' : 'var(--sign)';
-      $('tLoud').textContent = Math.round(v.level) + ' dB'; $('tNoise').textContent = Math.round(v.noise) + ' dB';
-      if (v.result) {
-        const r = v.result;
-        $('tLen').textContent = (r.len * 1024 / actx.sampleRate).toFixed(1) + ' s' + (r.reason === 'length' ? ' (too short or long)' : '');
-        $('tDist').textContent = r.reason ? '–' : `${r.dist.toFixed(1)} (pass < ${v.threshold.toFixed(1)})`;
-        $('tDist').style.color = r.ok ? 'var(--ok)' : '';
-      }
-    }));
-  } catch (e) { toast(e.message, 6000); if (!stops.length) toggleTest(); }
+    const st = await startDetector('test', () => hit('"Oi oi oi"'), heard, (msg) => ($('screamInfo').textContent = msg));
+    if (stopTest) stops.push(st); else st(); // the test may have been stopped while the model loaded
+  } catch (e) { $('screamInfo').textContent = ''; toast(e.message, 6000); if (stopTest && !stops.length) toggleTest(); }
 }
 $('testScream').onclick = toggleTest;
 
@@ -584,12 +564,13 @@ async function startListening() {
   startGps();
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
   if (mode !== 'words') {
-    const bar = $('level').firstElementChild;
     try {
-      stopDetector = await startDetector('drive', () => trigger('voice'), (v) => {
-        bar.style.width = Math.max(0, Math.min(100, (v.level - v.noise) / 20 * 100)) + '%';
-        bar.style.background = v.result?.ok ? 'var(--ok)' : 'var(--sign)';
-      });
+      const st = await startDetector('drive', () => trigger('voice'), (t) => {
+        $('micText').textContent = '"' + t.split(' ').slice(-3).join(' ') + '"';
+        clearTimeout(startListening.t); startListening.t = setTimeout(() => listening && ($('micText').textContent = 'Listening'), 2500);
+      }, (msg) => msg && ($('micText').textContent = msg.replace(', first time only', '')));
+      if (listening) stopDetector = st; else st();
+      if (listening && mode === 'voice') $('micText').textContent = 'Listening';
     } catch (e) { toast(e.message, 6000); }
   }
   if (mode !== 'voice') recog = startWords(() => trigger('words'), (t) => {
@@ -597,7 +578,7 @@ async function startListening() {
     clearTimeout(startListening.t); startListening.t = setTimeout(() => ($('micText').textContent = wordLabel()), 2500);
   });
   $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? wordLabel() : 'Listening';
-  say('Escuchando. Di oi oi oi para marcar un hoyo.');
+  say('Escuchando.');
 }
 // Starts continuous speech recognition. Calls onWord when the trigger word is heard and onHeard with each transcript.
 function startWords(onWord, onHeard) {

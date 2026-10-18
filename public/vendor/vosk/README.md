@@ -1,0 +1,2 @@
+- `vosk.js`: vosk-browser 0.0.8 (Apache-2.0), https://github.com/ccoreilly/vosk-browser
+- `model-es.tar.gz`: vosk-model-small-es-0.3 (Apache-2.0), https://alphacephei.com/vosk/models, repacked without macOS `._` files.

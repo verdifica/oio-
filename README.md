@@ -5,7 +5,7 @@ A phone web app (it can be added to the home screen) for flagging road hazards h
 ## What it does
 
 - **Drive mode** keeps the screen on, follows your GPS position and listens to the microphone.
-- **Trigger**: say "oi oi oi". Record it 3 times first (Menu > Record "oi oi oi", up to 5 recordings are kept; "Play my recording" plays the latest). The app then listens silently, with no beeps or speech service, and compares each burst of sound with your recordings (`public/kws.js`: mel-cepstrum features with the background subtracted, matched by dynamic time warping). "Test my trigger" shows the sound level, background, length and how different each sound was from your recordings, and says "Recognized" without creating flags. "Sensitivity" trades missed triggers against false alarms. Menu > Listen for can switch to the phone's speech recognition instead ("oi oi oi", "hoyo" or "ay ay ay"), which works too but makes the phone beep. The big red **Flag hazard** button does the same.
+- **Trigger**: say "oi, oi, oi" with a short break between each "oi". The app listens silently with Vosk, an offline Spanish speech recognizer that runs inside the page (no beeps, no internet, nothing sent anywhere). It only knows "oi" plus about 200 everyday words, so speech like "hoy voy" or "oye" is heard as those words instead of "oi"; "hoy" counts as "oi" because they sound the same, and 3 in a row are needed (2 can be chosen in Menu). The first use downloads the model (about 35 MB), which then stays in the phone's cache storage. "Test my trigger" shows what it heard and says "Recognized" without creating flags. Menu > Listen with can switch to Google speech recognition instead, which makes the phone beep. The big red **Flag hazard** button does the same.
 - After a trigger the phone beeps, says "Hoyo marcado" and **saves automatically after 5 seconds** at your location. Before that you can pick the type (pothole, debris, flooding, accident, other), add a photo with the red camera button (this stops the timer; the photo opens on the map after saving). Photos taken at an already-flagged spot are added to that flag, up to 6 per flag, or cancel (tap, or say "cancela" in word mode).
 - If an active flag already exists within 25 m, your flag is added to it as another reporter instead of creating a duplicate.
 - Flags show as a red flag on a yellow circle. Fixed ones turn grey.
@@ -55,14 +55,14 @@ Flags are stored in a free hosted Postgres database (Neon), so they survive rest
 - **Android Auto.** Android Auto only accepts certain app categories (navigation, points of interest, messaging, media). The hazard reporter would be a native Android app built with the Car App Library, using this same server.
 - **Listening with the screen off.** Web apps can't keep the microphone on in the background; the native app will.
 - **Accounts.** Each phone gets an anonymous id, so one person counts once per phone.
-- **"Oi oi oi" matching** was tuned with synthetic voices and car noise (other words, talking, "ay ay ay" and engine sound are ignored; the near-identical "ui ui ui" is accepted). It still needs road testing with real voices. It needs a couple of seconds after starting to learn the background sound.
+- **"Oi oi oi" recognition** was tested with synthetic Spanish voices (espeak) over car noise: every "oi, oi, oi" was recognized, and a minute of everyday talk full of "hoy", "voy" and "oye" never triggered it. Real voices on the road still need testing. Said very fast as one sound ("oioioi") it can be missed.
 - **Approximate location**: if the phone reports accuracy worse than 100 m (for example Chrome without "precise location" on Android), the app says so and does not auto-save the flag.
 
 ## Files
 
 - `server.js`: web server, API, KML/GeoJSON export, and storage (Postgres or local files).
 - `public/index.html`: the whole app (map, listening, flags, report).
-- `public/kws.js`: the personal "oi oi oi" detector.
+- `public/vendor/vosk/`: offline speech recognizer (vosk-browser 0.0.8) and its small Spanish model (vosk-model-small-es-0.3), both Apache-2.0.
 - `public/vendor/leaflet/`: map library (Leaflet 1.9.4, BSD-2 license), bundled so the app loads without a CDN.
 - `public/manifest.webmanifest`, `public/sw.js`, `public/icon.svg`: home-screen install.
 
