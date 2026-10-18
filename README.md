@@ -16,13 +16,16 @@ A phone web app (it can be added to the home screen) for flagging road hazards h
 
 ## Run it
 
-Needs Node 18 or newer, nothing else to install.
+Needs Node 18 or newer.
 
 ```
+npm install
 node server.js          # then open http://localhost:8080
 ```
 
-Flags are saved in `data/hazards.json` and photos in `data/photos/`.
+Where flags are kept:
+- **With `DATABASE_URL` set** to a Postgres connection string, flags and photos are stored in that database (tables `hazards` and `photos`, created automatically). The live app uses a free [Neon](https://neon.tech) database this way.
+- **Without it**, flags go to `data/hazards.json` and photos to `data/photos/`. Fine for trying it on one computer.
 
 ### On a phone
 
@@ -30,7 +33,7 @@ Phones only allow GPS and the microphone on `https://` pages (or `localhost`). O
 
 1. **Temporary HTTPS link from your computer**: run the server, then `npx cloudflared tunnel --url http://localhost:8080` and open the `https://…trycloudflare.com` link it prints on the phone. Anyone with the link can see and add flags while it runs.
 2. **USB (Android)**: connect the phone, open `chrome://inspect` on the computer, turn on port forwarding for 8080, then open `http://localhost:8080` on the phone.
-3. **Hosted**: deploy to any Node host (Render, Fly.io, Railway, a small server). Set `DATA_DIR` to a persistent disk.
+3. **Hosted**: deploy to any Node host (Render, Fly.io, Railway, a small server). Set `DATABASE_URL` so flags survive restarts. `render.yaml` deploys it to Render's free plan.
 
 To test at a desk without GPS, turn on Menu > "Place flags by tapping the map".
 
@@ -45,7 +48,7 @@ Recommendation: keep flags in our own store and publish them as an open KML/GeoJ
 | OpenStreetMap Notes | Yes, anonymously | Notes are meant for fixing map data. Mass app-made hazard notes get treated as spam, there is no "confirm" count, and closing a note needs an OSM account. |
 | Own store + open feed (this prototype) | Yes | We run the server. In return we control confirms, clears, photos and claim reports, and the feed loads in Google My Maps, Google Earth and any GIS. |
 
-The prototype keeps flags in a JSON file. For real use it can move to a hosted database (for example Firebase or Supabase) without changing how the app works.
+Flags are stored in a free hosted Postgres database (Neon), so they survive restarts of the free Render server.
 
 ## Not in this prototype yet
 
@@ -56,7 +59,7 @@ The prototype keeps flags in a JSON file. For real use it can move to a hosted d
 
 ## Files
 
-- `server.js`: web server, API, and KML/GeoJSON export (no dependencies).
+- `server.js`: web server, API, KML/GeoJSON export, and storage (Postgres or local files).
 - `public/index.html`: the whole app (map, listening, flags, report).
 - `public/vendor/leaflet/`: map library (Leaflet 1.9.4, BSD-2 license), bundled so the app loads without a CDN.
 - `public/manifest.webmanifest`, `public/sw.js`, `public/icon.svg`: home-screen install.

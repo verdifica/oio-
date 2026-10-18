@@ -1,5 +1,6 @@
-// OIOIOI prototype server. No dependencies: `node server.js`, then open http://localhost:8080
-// Stores hazards in data/hazards.json and photos in data/photos/. Serves the app from public/.
+// OIOIOI prototype server: `node server.js`, then open http://localhost:8080
+// With DATABASE_URL set, hazards and photos live in Postgres (e.g. a free Neon database).
+// Without it, they are kept in data/hazards.json and data/photos/. Serves the app from public/.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -14,14 +15,37 @@ const PHOTOS = path.join(DATA, 'photos');
 const TYPES = ['pothole', 'debris', 'flooding', 'accident', 'other'];
 const MAX_BODY = 2 * 1024 * 1024;
 
-fs.mkdirSync(PHOTOS, { recursive: true });
-let hazards = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : [];
+const DATABASE_URL = process.env.DATABASE_URL;
+let pool = null;
+let hazards = [];
 
-function save() {
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(hazards, null, 1));
-  fs.renameSync(tmp, DB_FILE);
-}
+// Storage: Postgres when DATABASE_URL is set, otherwise local files.
+const storage = DATABASE_URL ? {
+  async init() {
+    const { Pool } = require('pg');
+    pool = new Pool({ connectionString: DATABASE_URL, max: 3 });
+    await pool.query(`CREATE TABLE IF NOT EXISTS hazards (id text PRIMARY KEY, data jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS photos (id text PRIMARY KEY, jpeg bytea NOT NULL)`);
+    hazards = (await pool.query('SELECT data FROM hazards ORDER BY created_at')).rows.map((r) => r.data);
+  },
+  async saveHazard(h) {
+    await pool.query('INSERT INTO hazards (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data', [h.id, h]);
+  },
+  async savePhoto(id, buf) { await pool.query('INSERT INTO photos (id, jpeg) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [id, buf]); },
+  async getPhoto(id) { return (await pool.query('SELECT jpeg FROM photos WHERE id = $1', [id])).rows[0]?.jpeg || null; },
+} : {
+  async init() {
+    fs.mkdirSync(PHOTOS, { recursive: true });
+    hazards = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : [];
+  },
+  async saveHazard() {
+    const tmp = DB_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(hazards, null, 1));
+    fs.renameSync(tmp, DB_FILE);
+  },
+  async savePhoto(id, buf) { fs.writeFileSync(path.join(PHOTOS, id + '.jpg'), buf); },
+  async getPhoto(id) { const f = path.join(PHOTOS, id + '.jpg'); return fs.existsSync(f) ? fs.readFileSync(f) : null; },
+};
 
 // Votes are maps of userId -> timestamp; 0 means the vote was withdrawn.
 const count = (votes) => Object.values(votes || {}).filter((t) => t > 0).length;
@@ -108,10 +132,10 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && parts[1] === 'photos' && /^[\w-]+$/.test(parts[2] || '')) {
-    const file = path.join(PHOTOS, parts[2] + '.jpg');
-    if (!fs.existsSync(file)) return send(res, 404, { error: 'no photo' });
-    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-    return fs.createReadStream(file).pipe(res);
+    const jpeg = await storage.getPhoto(parts[2]);
+    if (!jpeg) return send(res, 404, { error: 'no photo' });
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+    return res.end(jpeg);
   }
 
   if (req.method !== 'POST') return send(res, 404, { error: 'not found' });
@@ -130,11 +154,11 @@ async function api(req, res, url) {
       reporters: { [body.uid]: now }, clears: {}, hasPhoto: false,
     };
     if (typeof body.photo === 'string' && body.photo.startsWith('data:image/jpeg;base64,')) {
-      fs.writeFileSync(path.join(PHOTOS, h.id + '.jpg'), Buffer.from(body.photo.split(',')[1], 'base64'));
+      await storage.savePhoto(h.id, Buffer.from(body.photo.split(',')[1], 'base64'));
       h.hasPhoto = true;
     }
     hazards.push(h);
-    save();
+    await storage.saveHazard(h);
     return send(res, 201, withStatus(h));
   }
 
@@ -143,11 +167,11 @@ async function api(req, res, url) {
   if (parts[3] === 'confirm') { h.reporters[body.uid] = now; if (h.clears[body.uid]) h.clears[body.uid] = 0; }
   else if (parts[3] === 'clear') { h.clears[body.uid] = now; }
   else return send(res, 404, { error: 'not found' });
-  save();
+  await storage.saveHazard(h);
   return send(res, 200, withStatus(h));
 }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
     if (url.pathname.startsWith('/api/')) return await api(req, res, url);
@@ -160,4 +184,8 @@ http.createServer(async (req, res) => {
     console.error(e);
     send(res, 500, { error: 'server error' });
   }
-}).listen(PORT, () => console.log(`OIOIOI prototype on http://localhost:${PORT}`));
+});
+
+storage.init().then(() => {
+  server.listen(PORT, () => console.log(`OIOIOI prototype on http://localhost:${PORT} (${DATABASE_URL ? 'Postgres' : 'local files'}, ${hazards.length} hazards)`));
+}).catch((e) => { console.error('Could not open storage:', e.message); process.exit(1); });
