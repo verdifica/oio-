@@ -53,7 +53,19 @@ function status(h) {
   const need = Math.max(1, Math.ceil(count(h.reporters) / 2));
   return count(h.clears) >= need ? 'fixed' : 'active';
 }
-const withStatus = (h) => ({ ...h, status: status(h) });
+const withStatus = (h) => ({ ...h, status: status(h), photos: photoIds(h) });
+// Older hazards stored one photo under the hazard's own id; newer ones keep a list of photo ids.
+const photoIds = (h) => h.photos || (h.hasPhoto ? [h.id] : []);
+const MAX_PHOTOS = 6;
+async function addPhoto(h, dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/jpeg;base64,')) return;
+  const ids = photoIds(h);
+  if (ids.length >= MAX_PHOTOS) return;
+  const id = crypto.randomUUID();
+  await storage.savePhoto(id, Buffer.from(dataUrl.split(',')[1], 'base64'));
+  h.photos = [...ids, id];
+  h.hasPhoto = true;
+}
 
 function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -89,7 +101,7 @@ function geojson(list, base) {
         id: h.id, type: h.type, status: status(h), note: h.note || '',
         reported_at: new Date(h.createdAt).toISOString(),
         reporters: count(h.reporters), clear_votes: count(h.clears),
-        photo_url: h.hasPhoto ? `${base}/api/photos/${h.id}` : null,
+        photo_urls: photoIds(h).map((id) => `${base}/api/photos/${id}`),
       },
     })),
   };
@@ -99,7 +111,7 @@ function kml(list, base) {
   const marks = list.map((h) => `  <Placemark>
     <name>${esc(h.type)} (${count(h.reporters)} reporters)</name>
     <styleUrl>#${status(h)}</styleUrl>
-    <description>${esc(`Status: ${status(h)}. Reported ${new Date(h.createdAt).toISOString()}. ${h.note || ''}`)}${h.hasPhoto ? esc(` Photo: ${base}/api/photos/${h.id}`) : ''}</description>
+    <description>${esc(`Status: ${status(h)}. Reported ${new Date(h.createdAt).toISOString()}. ${h.note || ''}`)}${photoIds(h).map((id) => esc(` Photo: ${base}/api/photos/${id}`)).join('')}</description>
     <ExtendedData>
       <Data name="status"><value>${status(h)}</value></Data>
       <Data name="reporters"><value>${count(h.reporters)}</value></Data>
@@ -151,12 +163,9 @@ async function api(req, res, url) {
       id: crypto.randomUUID(), type: TYPES.includes(body.type) ? body.type : 'pothole',
       lat, lng, accuracy: Number(body.accuracy) || null, heading: Number.isFinite(body.heading) ? body.heading : null,
       note: String(body.note || '').slice(0, 280), createdAt: now, createdBy: body.uid,
-      reporters: { [body.uid]: now }, clears: {}, hasPhoto: false,
+      reporters: { [body.uid]: now }, clears: {}, hasPhoto: false, photos: [],
     };
-    if (typeof body.photo === 'string' && body.photo.startsWith('data:image/jpeg;base64,')) {
-      await storage.savePhoto(h.id, Buffer.from(body.photo.split(',')[1], 'base64'));
-      h.hasPhoto = true;
-    }
+    await addPhoto(h, body.photo);
     hazards.push(h);
     await storage.saveHazard(h);
     return send(res, 201, withStatus(h));
@@ -164,7 +173,7 @@ async function api(req, res, url) {
 
   const h = parts[1] === 'hazards' && hazards.find((x) => x.id === parts[2]);
   if (!h) return send(res, 404, { error: 'not found' });
-  if (parts[3] === 'confirm') { h.reporters[body.uid] = now; if (h.clears[body.uid]) h.clears[body.uid] = 0; }
+  if (parts[3] === 'confirm') { h.reporters[body.uid] = now; if (h.clears[body.uid]) h.clears[body.uid] = 0; await addPhoto(h, body.photo); }
   else if (parts[3] === 'clear') { h.clears[body.uid] = now; }
   else return send(res, 404, { error: 'not found' });
   await storage.saveHazard(h);

@@ -141,20 +141,21 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     <div class="row">
       <button class="btn primary" id="recordScream">Record my shout (3 s)</button>
       <button class="btn" id="playScream" disabled>Play my shout</button>
-      <button class="btn" id="testScream">Test my shout</button>
+      <button class="btn" id="testScream">Test my trigger</button>
       <button class="btn" id="deleteScream" disabled>Delete recordings</button>
     </div>
     <p id="screamInfo"></p>
     <div class="testpanel" id="testPanel" hidden>
-      <div class="meter" aria-hidden="true"><i id="tLevel"></i><b id="tThresh"></b></div>
-      <div class="stats">
+      <div class="stats" id="tWordRow"><span>Heard <b id="tHeard">–</b></span></div>
+      <div class="meter" id="tMeter" aria-hidden="true"><i id="tLevel"></i><b id="tThresh"></b></div>
+      <div class="stats" id="tShoutRow">
         <span>Loudness <b id="tLoud">–</b></span>
         <span>Background <b id="tNoise">–</b></span>
         <span>Shape match <b id="tMatch">–</b></span>
         <span>Held <b id="tHeld">–</b></span>
       </div>
       <div class="tresult" id="tResult" role="status">Shout now</div>
-      <p>The bar must pass the white line, and "Shape match" must turn green, for long enough. Practice until you see "Recognized" every time, and try talking or playing the radio to check it stays quiet.</p>
+      <p>Test mode never creates flags. For a word, "Heard" shows what the phone understood. For a shout, the bar must pass the white line and "Shape match" must turn green for long enough. Practice until you see "Recognized" every time, then talk or play the radio to check it stays quiet.</p>
     </div>
     <label>Shout sensitivity
       <select id="sensitivity">
@@ -165,9 +166,17 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     </label>
     <label>Listen for
       <select id="triggerMode">
+        <option value="words">A spoken word (most reliable)</option>
         <option value="shout">My recorded shout</option>
-        <option value="words">Spoken words (uses speech recognition)</option>
         <option value="both">Both</option>
+      </select>
+    </label>
+    <label>Trigger word
+      <select id="triggerWord">
+        <option value="hoyo">"Hoyo"</option>
+        <option value="oioioi">"Oioioi" (or "oy oy oy")</option>
+        <option value="ayayay">"Ay ay ay"</option>
+        <option value="any">Any of these, or "pothole"</option>
       </select>
     </label>
 
@@ -211,7 +220,13 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
 const $ = (id) => document.getElementById(id);
 const TYPES_ES = { pothole: 'Hoyo', debris: 'Escombros', flooding: 'Inundación', accident: 'Accidente', other: 'Otro peligro' };
 const TYPES = { pothole: 'Pothole', debris: 'Debris', flooding: 'Flooding', accident: 'Accident', other: 'Other danger' };
-const WORDS = /\b(bache|hoyo|pothole|oi ?oi ?oi|ay ay ay|peligro|danger|hazard)\b/i;
+// Speech recognition writes these words in several ways, so each pattern accepts the common spellings.
+const WORD_PATTERNS = {
+  hoyo: /\bhoyos?\b/i,
+  oioioi: /(\b(h?o[iy]|ui)\b[\s,.!¡-]*){2,}|\b(h?oi){2,}\b|\boy ?oy\b/i,
+  ayayay: /(\bay\b[\s,.!¡-]*){2,}|\b(ay){2,}\b|ahí,? ahí/i,
+};
+const wordMatches = (t) => { const w = store.get('word', 'hoyo'); return w === 'any' ? Object.values(WORD_PATTERNS).some((r) => r.test(t)) || /\bpothole\b/i.test(t) : WORD_PATTERNS[w].test(t); };
 const WARN_RADIUS_M = 200, DEDUPE_RADIUS_M = 25, AUTO_SAVE_S = 5, APPROX_M = 100;
 
 const store = {
@@ -277,7 +292,7 @@ function popupHtml(h) {
   return `<h3>${esc(TYPES[h.type] || h.type)}</h3>
     <div>${h.status === 'fixed' ? '<b>Marked fixed</b>' : '<b style="color:var(--sign)">Active</b>'} · ${votes(h.reporters)} reporter${votes(h.reporters) === 1 ? '' : 's'} · ${votes(h.clears)} say fixed</div>
     <div style="color:var(--muted);font-size:13px">Reported ${new Date(h.createdAt).toLocaleString()}</div>
-    ${h.hasPhoto ? `<img src="api/photos/${h.id}" alt="Photo of the hazard">` : ''}
+    ${(h.photos || []).map((id) => `<a href="api/photos/${id}" target="_blank" rel="noopener"><img src="api/photos/${id}" alt="Photo of the hazard"></a>`).join('')}
     <div class="pop-actions">
       <button class="btn primary" onclick="vote('${h.id}','confirm')" ${mine && !cleared ? 'disabled' : ''}>${mine && !cleared ? 'You reported it' : 'Still there'}</button>
       <button class="btn green" onclick="vote('${h.id}','clear')" ${cleared ? 'disabled' : ''}>${cleared ? 'You said fixed' : "It's fixed"}</button>
@@ -287,9 +302,9 @@ function popupHtml(h) {
 async function refresh() {
   try { hazards = await api('hazards'); render(); checkAhead(); } catch (e) { console.warn('refresh failed', e); }
 }
-async function vote(id, action) {
+async function vote(id, action, extra = {}) {
   try {
-    const h = await api(`hazards/${id}/${action}`, {});
+    const h = await api(`hazards/${id}/${action}`, extra);
     hazards = hazards.map((x) => (x.id === id ? h : x)); render();
     toast(action === 'clear' ? (h.status === 'fixed' ? 'Marked as fixed' : 'Your "fixed" vote was counted') : 'Added you to the reporters');
   } catch (e) { toast('Could not save: ' + e.message); }
@@ -370,12 +385,19 @@ $('photoBtn').onclick = () => { stopCountdown(); $('photoInput').click(); };
 $('photoInput').addEventListener('change', async (e) => {
   const f = e.target.files[0]; if (!f || !pending) return;
   stopCountdown();
-  pending.photo = await shrink(f);
+  $('photoName').textContent = 'Preparing photo…';
+  try { pending.photo = await shrink(f); }
+  catch (err) { $('photoName').textContent = 'Could not read that photo. Try again.'; e.target.value = ''; return; }
   $('photoPreview').src = pending.photo; $('photoPreview').hidden = false; $('photoName').textContent = 'Photo attached. Tap Save.';
   e.target.value = '';
 });
 async function shrink(file) {
-  const img = await createImageBitmap(file);
+  // createImageBitmap is fastest, but some phone browsers can't decode camera files with it, so fall back to an <img>.
+  let img;
+  try { img = await createImageBitmap(file); }
+  catch {
+    img = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = URL.createObjectURL(file); });
+  }
   const s = Math.min(1, 1024 / Math.max(img.width, img.height));
   const c = document.createElement('canvas'); c.width = img.width * s; c.height = img.height * s;
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
@@ -388,7 +410,12 @@ async function saveFlag() {
   // If someone already flagged this spot, join that report instead of duplicating it.
   const near = hazards.find((h) => h.status === 'active' && distM(p, h) < DEDUPE_RADIUS_M);
   try {
-    if (near) { await vote(near.id, 'confirm'); say('Ya estaba reportado. Te añadimos como reclamante.'); return; }
+    // A photo taken at an already-flagged spot is added to that flag.
+    if (near) {
+      await vote(near.id, 'confirm', p.photo ? { photo: p.photo } : {}); say('Ya estaba reportado. Te añadimos como reclamante.');
+      if (p.photo) { map.panTo([near.lat, near.lng]); markers.get(near.id)?.openPopup(); }
+      return;
+    }
     const h = await api('hazards', p);
     hazards.push(h); render(); toast('Hazard saved'); beep(1320, 120);
     if (h.hasPhoto) { map.panTo([h.lat, h.lng]); markers.get(h.id)?.openPopup(); } // show the saved photo
@@ -420,8 +447,10 @@ function screamLabel() {
   $('screamInfo').textContent = n ? `${n} recording${n > 1 ? 's' : ''} saved${n < 3 ? '. Record ' + (3 - n) + ' more for better recognition.' : '.'}` : 'No shout recorded yet. Until you record one, any very loud sound will trigger.';
   $('playScream').disabled = !screamAudio; $('deleteScream').disabled = !n;
 }
-$('triggerMode').value = store.get('mode', 'shout');
-$('triggerMode').onchange = (e) => { store.set('mode', e.target.value); if (listening) { stopListening(); startListening(); } };
+$('triggerMode').value = store.get('mode', 'words');
+$('triggerWord').value = store.get('word', 'hoyo');
+$('triggerWord').onchange = (e) => { store.set('word', e.target.value); if (stopTest) { toggleTest(); toggleTest(); } };
+$('triggerMode').onchange = (e) => { store.set('mode', e.target.value); if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } };
 $('sensitivity').value = store.get('sens', 'medium');
 $('sensitivity').onchange = (e) => { store.set('sens', e.target.value); if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } };
 
@@ -534,23 +563,36 @@ $('deleteScream').onclick = () => { scream = null; screamAudio = null; store.set
 // Test mode: same detector as Drive, but it only shows what it hears and never creates a flag.
 let hits = 0;
 async function toggleTest() {
-  if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = 'Test my shout'; return; }
+  const label = 'Test my trigger';
+  if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = label; return; }
   if (listening) stopListening();
-  hits = 0; $('testPanel').hidden = false; $('testScream').textContent = 'Stop test'; $('tResult').textContent = 'Shout now'; $('tResult').classList.remove('hit');
+  const mode = store.get('mode', 'words');
+  hits = 0; $('testPanel').hidden = false; $('testScream').textContent = 'Stop test';
+  const idle = mode === 'shout' ? 'Shout now' : mode === 'words' ? wordLabel() : wordLabel() + ' or shout';
+  $('tResult').textContent = idle; $('tResult').classList.remove('hit');
+  $('tWordRow').hidden = mode === 'shout'; $('tMeter').hidden = $('tShoutRow').hidden = mode === 'words'; $('tHeard').textContent = '–';
+  const hit = (what) => {
+    hits++; beep(1320, 150);
+    $('tResult').textContent = `${what} recognized ✓ (${hits})`; $('tResult').classList.add('hit');
+    clearTimeout(toggleTest.t); toggleTest.t = setTimeout(() => { $('tResult').textContent = idle; $('tResult').classList.remove('hit'); }, 1500);
+  };
+  const stops = [];
+  stopTest = () => stops.forEach((f) => f());
+  if (mode !== 'shout') {
+    const st = startWords(() => hit('Word'), (t) => ($('tHeard').textContent = '"' + t.trim() + '"'));
+    if (st) stops.push(st);
+  }
+  if (mode === 'words') return;
   const pct = (rms) => Math.max(0, Math.min(100, (dbfs(rms) + 70) / 70 * 100)); // meter shows -70 to 0 dB
   try {
-    stopTest = await startDetector('test', () => {
-      hits++; beep(1320, 150);
-      $('tResult').textContent = `Recognized ✓ (${hits})`; $('tResult').classList.add('hit');
-      clearTimeout(toggleTest.t); toggleTest.t = setTimeout(() => { $('tResult').textContent = 'Shout now'; $('tResult').classList.remove('hit'); }, 1500);
-    }, (v) => {
+    stops.push(await startDetector('test', () => hit('Shout'), (v) => {
       $('tLevel').style.width = pct(v.rms) + '%'; $('tLevel').style.background = v.loud && v.match ? 'var(--ok)' : 'var(--sign)';
       $('tThresh').style.left = pct(v.thresh) + '%';
       $('tLoud').textContent = Math.round(dbfs(v.rms)) + ' dB'; $('tNoise').textContent = Math.round(dbfs(v.noise)) + ' dB';
       $('tMatch').textContent = Math.round(v.sim * 100) + '%'; $('tMatch').style.color = v.match ? 'var(--ok)' : '';
       $('tHeld').textContent = `${Math.round(v.heldMs)} / ${Math.round(v.needMs)} ms`;
-    });
-  } catch (e) { toast('Microphone not available: ' + (e.name || '') + ' ' + e.message, 6000); stopTest = null; $('testPanel').hidden = true; $('testScream').textContent = 'Test my shout'; }
+    }));
+  } catch (e) { toast('Microphone not available: ' + (e.name || '') + ' ' + e.message, 6000); }
 }
 $('testScream').onclick = toggleTest;
 
@@ -562,7 +604,7 @@ function trigger(src) {
 }
 
 async function startListening() {
-  const mode = store.get('mode', 'shout');
+  const mode = store.get('mode', 'words');
   if (stopTest) toggleTest();
   listening = true; $('listenBtn').classList.add('active'); $('listenBtn').setAttribute('aria-pressed', 'true'); $('listenBtn').textContent = 'Stop';
   startGps();
@@ -576,21 +618,36 @@ async function startListening() {
       });
     } catch (e) { toast('Microphone blocked: ' + e.message); }
   }
-  if (mode !== 'shout') startWords();
-  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? 'Say "hoyo"' : 'Listening';
+  if (mode !== 'shout') recog = startWords(() => trigger('words'), (t) => {
+    $('micText').textContent = '"' + t.trim().split(/\s+/).slice(-3).join(' ') + '"';
+    clearTimeout(startListening.t); startListening.t = setTimeout(() => ($('micText').textContent = wordLabel()), 2500);
+  });
+  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? wordLabel() : 'Listening';
   say('Escuchando. Grita para marcar un hoyo.');
 }
-function startWords() {
+// Starts continuous speech recognition. Calls onWord when the trigger word is heard and onHeard with each transcript.
+function startWords(onWord, onHeard) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { toast('Speech recognition is not supported in this browser'); return; }
-  recog = new SR(); recog.lang = 'es-PR'; recog.continuous = true; recog.interimResults = true;
-  recog.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (pending && /\b(cancel|cancela|no)\b/i.test(t)) $('cancelFlag').click(); else if (WORDS.test(t)) trigger('words'); } };
-  recog.onend = () => { if (listening && recog) try { recog.start(); } catch {} };
-  try { recog.start(); } catch {}
+  if (!SR) { toast('Speech recognition is not supported in this browser. Use Chrome.'); return null; }
+  let r = new SR(), last = 0;
+  r.lang = 'es-PR'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
+  r.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const alts = [...e.results[i]].map((a) => a.transcript);
+      onHeard?.(alts[0]);
+      if (pending && alts.some((t) => /\b(cancel|cancela|cancelar)\b/i.test(t))) { $('cancelFlag').click(); continue; }
+      if (alts.some(wordMatches) && Date.now() - last > 3000) { last = Date.now(); onWord(); }
+    }
+  };
+  r.onerror = (e) => { if (e.error === 'not-allowed') toast('Microphone blocked for speech recognition'); };
+  r.onend = () => { if (r) try { r.start(); } catch {} }; // the browser stops listening now and then; restart it
+  try { r.start(); } catch {}
+  return () => { const x = r; r = null; x.onend = null; try { x.stop(); } catch {} };
 }
+const wordLabel = () => ({ hoyo: 'Say "hoyo"', oioioi: 'Say "oioioi"', ayayay: 'Say "ay ay ay"', any: 'Say "hoyo"' })[store.get('word', 'hoyo')];
 function stopListening() {
   listening = false; stopDetector?.(); stopDetector = null; $('level').firstElementChild.style.width = 0;
-  if (recog) { const r = recog; recog = null; r.onend = null; try { r.stop(); } catch {} }
+  recog?.(); recog = null;
   wakeLock?.release?.(); wakeLock = null;
   $('listenBtn').classList.remove('active'); $('listenBtn').setAttribute('aria-pressed', 'false'); $('listenBtn').textContent = 'Drive';
   $('micChip').classList.remove('on'); $('micText').textContent = 'Mic off';
@@ -614,7 +671,7 @@ Ubicación / Location: ${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}${h.accuracy ? ` 
 Mapa / Map: https://www.google.com/maps?q=${h.lat.toFixed(6)},${h.lng.toFixed(6)}
 Estado / Status: ${h.status === 'fixed' ? 'Reportado como reparado / Reported fixed' : 'Activo / Active'}
 Conductores que lo confirman / Drivers confirming: ${votes(h.reporters)}
-Foto / Photo: ${h.hasPhoto ? new URL('api/photos/' + h.id, location.href).href : 'No'}
+Fotos / Photos: ${(h.photos || []).length ? h.photos.map((id) => new URL('api/photos/' + id, location.href).href).join('\n  ') : 'No'}
 
 Reportado por / Reported by:
   Nombre / Name: ${p.name || '__________'}
