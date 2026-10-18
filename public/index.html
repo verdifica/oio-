@@ -74,6 +74,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .types button[aria-pressed="true"] { background: var(--sign); color: #111; border-color: var(--sign); }
 .count { font: 800 64px/1 var(--display); color: var(--sign); font-variant-numeric: tabular-nums; }
 label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+[hidden] { display: none !important; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--asphalt); border: 1px solid var(--line); border-radius: 8px; padding: 10px; width: 100%; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .section-label { font: 600 13px/1 var(--body); text-transform: uppercase; letter-spacing: .08em; color: var(--sign); margin-top: 6px; }
@@ -137,7 +138,7 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     <div class="row" style="justify-content:space-between;align-items:center"><h2 id="menuTitle">Settings</h2><button class="btn" data-close>Close</button></div>
 
     <div class="section-label">Your trigger</div>
-    <p>Say <b>"oi, oi, oi"</b> with a short break between each "oi". The app listens silently with a Spanish speech recognizer that runs on the phone itself: no beeps, no internet needed, and nothing is sent anywhere. The first time, it downloads the recognizer (about 35 MB); after that it is kept on the phone.</p>
+    <p>Say <b>"oi, oi, oi"</b> with a short break between each "oi", or <b>"hoyo"</b> by itself, depending on the word you pick below. The app listens silently with a Spanish speech recognizer that runs on the phone itself: no beeps, no internet needed, and nothing is sent anywhere. The first time, it downloads the recognizer (about 35 MB); after that it is kept on the phone.</p>
     <div class="row">
       <button class="btn primary" id="testScream">Test my trigger</button>
     </div>
@@ -147,19 +148,28 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
       <div class="tresult" id="tResult" role="status">Say "oi, oi, oi"</div>
       <p>Test mode never creates flags. "Heard" shows what the recognizer understood; "hoy" counts as "oi" because they sound the same. Then talk normally or play the radio to check it stays quiet.</p>
     </div>
-    <label>How many times to say "oi"
-      <select id="oiCount">
-        <option value="3">3 times (fewer false alarms)</option>
-        <option value="2">2 times (easier, but "hoy, hoy" in a conversation could trigger it)</option>
-      </select>
-    </label>
     <label>Listen with
       <select id="triggerMode">
         <option value="voice">Silent recognizer on the phone</option>
         <option value="words">Google speech recognition (the phone may beep)</option>
         <option value="both">Both</option>
+        <option value="none">No microphone: buttons only</option>
       </select>
     </label>
+    <label id="voiceWordLabel">Word to say
+      <select id="voiceWord">
+        <option value="oioioi">"Oi, oi, oi"</option>
+        <option value="hoyo">"Hoyo" said by itself (not inside a sentence)</option>
+      </select>
+    </label>
+    <label id="oiCountLabel">How many times to say "oi"
+      <select id="oiCount">
+        <option value="3">3 times (fewer false alarms)</option>
+        <option value="2">2 times (easier, but "hoy, hoy" in a conversation could trigger it)</option>
+      </select>
+    </label>
+    <label><span><input type="checkbox" id="wheelBtn" style="width:auto"> Steering-wheel button flags a hazard</span></label>
+    <p id="wheelInfo">In Drive mode, the next-track or play/pause button on the steering wheel (or a Bluetooth button) flags a hazard. To receive those buttons, the app plays silence as "music" over Bluetooth, so other music on the phone stops while Drive is on. Experimental: it depends on the car and the phone.</p>
     <label id="triggerWordLabel">Word for Google speech recognition
       <select id="triggerWord">
         <option value="oioioi">"Oi oi oi" (or "oy oy oy")</option>
@@ -420,11 +430,20 @@ map.on('click', (e) => { if ($('placeByTap').checked) openFlag('button', e.latln
 let listening = false, recog, wakeLock, lastTrigger = 0, stopDetector = null, stopTest = null;
 if (['shout'].includes(store.get('mode'))) store.set('mode', 'voice'); // older setting name
 ['oiTemplates', 'screamAudio', 'scream'].forEach((k) => { try { localStorage.removeItem('oioioi.' + k); } catch {} }); // recordings of earlier versions
-function screamLabel() { $('triggerWordLabel').hidden = store.get('mode', 'voice') === 'voice'; }
+function screamLabel() {
+  const mode = store.get('mode', 'voice'), voice = mode === 'voice' || mode === 'both';
+  $('triggerWordLabel').hidden = !(mode === 'words' || mode === 'both');
+  $('voiceWordLabel').hidden = !voice; $('oiCountLabel').hidden = !voice || store.get('voiceWord', 'oioioi') !== 'oioioi';
+  $('testScream').hidden = mode === 'none'; $('wheelInfo').hidden = !$('wheelBtn').checked;
+}
 $('triggerMode').value = store.get('mode', 'voice');
 $('triggerMode').onchange = (e) => { store.set('mode', e.target.value); screamLabel(); restartListening(); };
 $('triggerWord').value = store.get('word', 'oioioi');
 $('triggerWord').onchange = (e) => { store.set('word', e.target.value); restartListening(); };
+$('voiceWord').value = store.get('voiceWord', 'oioioi');
+$('voiceWord').onchange = (e) => { store.set('voiceWord', e.target.value); screamLabel(); restartListening(); };
+$('wheelBtn').checked = store.get('wheel', false);
+$('wheelBtn').onchange = (e) => { store.set('wheel', e.target.checked); screamLabel(); restartListening(); };
 $('oiCount').value = String(store.get('oiCount', 3));
 $('oiCount').onchange = (e) => { store.set('oiCount', Number(e.target.value)); restartListening(); };
 function restartListening() { if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } }
@@ -490,7 +509,7 @@ function oiRun(words) { let n = 0; for (const w of words) n = OI.has(w) ? n + 1 
 async function startDetector(user, onHit, onHeard, onStatus = () => {}) {
   const model = await loadVoice(onStatus);
   const m = await getMic(user);
-  const need = store.get('oiCount', 3);
+  const need = store.get('oiCount', 3), word = store.get('voiceWord', 'oioioi');
   const rec = new model.KaldiRecognizer(actx.sampleRate, JSON.stringify(['oi', ...DECOYS, '[unk]']));
   let heard = [], heardAt = 0, fired = false;
   const check = (text, final) => {
@@ -499,6 +518,8 @@ async function startDetector(user, onHit, onHeard, onStatus = () => {}) {
     if (speechSynthesis.speaking || Date.now() - spokeAt < 800) { if (final) heard = []; return; }
     if (words.length) onHeard?.(words.join(' '));
     if (pending && words.some((w) => /^cancela/.test(w))) $('cancelFlag').click();
+    // "Hoyo" counts only when said by itself, so talking about a hoyo doesn't flag one.
+    if (word === 'hoyo') { if (final && words.length && words.every((w) => w === 'hoyo')) onHit(); return; }
     // Runs may continue across recognizer results when there is a short pause between each "oi".
     const all = [...(Date.now() - heardAt < 2500 ? heard : []), ...words];
     if (!fired && oiRun(all) >= need) { fired = true; onHit(); }
@@ -528,10 +549,11 @@ let hits = 0;
 async function toggleTest() {
   const label = 'Test my trigger';
   if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = label; $('screamInfo').textContent = ''; return; }
+  if (store.get('mode', 'voice') === 'none') return;
   if (listening) stopListening();
   const mode = store.get('mode', 'voice'), need = store.get('oiCount', 3);
   hits = 0; $('testPanel').hidden = false; $('testScream').textContent = 'Stop test';
-  const idle = mode === 'words' ? wordLabel() : `Say "${Array(need).fill('oi').join(', ')}"`;
+  const idle = mode === 'words' ? wordLabel() : store.get('voiceWord', 'oioioi') === 'hoyo' ? 'Say "hoyo"' : `Say "${Array(need).fill('oi').join(', ')}"`;
   $('tResult').textContent = idle; $('tResult').classList.remove('hit'); $('tHeard').textContent = '–';
   const hit = (what) => {
     hits++; beep(1320, 150);
@@ -541,14 +563,53 @@ async function toggleTest() {
   const heard = (t) => ($('tHeard').textContent = '"' + t.trim() + '"');
   const stops = [];
   stopTest = () => stops.forEach((f) => f());
-  if (mode !== 'voice') { const st = startWords(() => hit('Word'), heard); if (st) stops.push(st); }
-  if (mode === 'words') return;
+  if (mode === 'words' || mode === 'both') { const st = startWords(() => hit('Word'), heard); if (st) stops.push(st); }
+  if (mode === 'words' || mode === 'none') return;
   try {
-    const st = await startDetector('test', () => hit('"Oi oi oi"'), heard, (msg) => ($('screamInfo').textContent = msg));
+    const st = await startDetector('test', () => hit(store.get('voiceWord', 'oioioi') === 'hoyo' ? '"Hoyo"' : '"Oi oi oi"'), heard, (msg) => ($('screamInfo').textContent = msg));
     if (stopTest) stops.push(st); else st(); // the test may have been stopped while the model loaded
   } catch (e) { $('screamInfo').textContent = ''; toast(e.message, 6000); if (stopTest && !stops.length) toggleTest(); }
 }
 $('testScream').onclick = toggleTest;
+
+// Steering-wheel and Bluetooth buttons. A web page receives media buttons only while it is playing audio,
+// so the app plays silence as "music" and treats next/previous/play/pause as "flag a hazard".
+let wheel = null;
+function silentWav(seconds) {
+  const rate = 8000, n = rate * seconds, b = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, rate, true); b.setUint32(28, rate * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); str(36, 'data'); b.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) b.setInt16(44 + i * 2, (i % 2) * 2 - 1, true); // ±1 of 32768: inaudible, but not digital silence that phones may skip
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+function wheelPress() { if (!listening) return; if (pending) { $('saveFlag').click(); return; } trigger('button'); }
+function startWheel() {
+  stopWheel();
+  const audio = new Audio(silentWav(10)); audio.loop = true;
+  audio.play().catch(() => toast('Steering-wheel button: tap Drive again to allow audio'));
+  const ms = navigator.mediaSession;
+  if (ms) {
+    ms.metadata = new MediaMetadata({ title: 'OIOIOI: press ⏭ to flag a hazard', artist: 'OIOIOI' });
+    ms.playbackState = 'playing';
+    for (const a of ['play', 'pause', 'nexttrack', 'previoustrack', 'seekforward', 'seekbackward', 'stop']) {
+      try { ms.setActionHandler(a, () => { wheelPress(); if (a === 'pause' || a === 'stop') audio.play().catch(() => {}); ms.playbackState = 'playing'; }); } catch {}
+    }
+  }
+  // If the system pauses the "music" anyway, start it again.
+  audio.onpause = () => { if (wheel?.audio === audio) setTimeout(() => audio.play().catch(() => {}), 300); };
+  wheel = { audio };
+}
+function stopWheel() {
+  if (!wheel) return;
+  const { audio } = wheel; wheel = null;
+  audio.onpause = null; audio.pause(); URL.revokeObjectURL(audio.src);
+  for (const a of ['play', 'pause', 'nexttrack', 'previoustrack', 'seekforward', 'seekbackward', 'stop']) try { navigator.mediaSession?.setActionHandler(a, null); } catch {}
+}
+// Bluetooth buttons and keyboards that send media keys as key presses.
+addEventListener('keydown', (e) => {
+  if (listening && store.get('wheel', false) && ['MediaTrackNext', 'MediaTrackPrevious', 'MediaPlayPause', 'MediaPlay', 'MediaPause'].includes(e.key)) { e.preventDefault(); wheelPress(); }
+});
 
 function trigger(src) {
   if (Date.now() - lastTrigger < 8000 || pending) return;
@@ -563,7 +624,8 @@ async function startListening() {
   listening = true; $('listenBtn').classList.add('active'); $('listenBtn').setAttribute('aria-pressed', 'true'); $('listenBtn').textContent = 'Stop';
   startGps();
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
-  if (mode !== 'words') {
+  if (store.get('wheel', false)) startWheel();
+  if (mode === 'voice' || mode === 'both') {
     try {
       const st = await startDetector('drive', () => trigger('voice'), (t) => {
         $('micText').textContent = '"' + t.split(' ').slice(-3).join(' ') + '"';
@@ -573,11 +635,11 @@ async function startListening() {
       if (listening && mode === 'voice') $('micText').textContent = 'Listening';
     } catch (e) { toast(e.message, 6000); }
   }
-  if (mode !== 'voice') recog = startWords(() => trigger('words'), (t) => {
+  if (mode === 'words' || mode === 'both') recog = startWords(() => trigger('words'), (t) => {
     $('micText').textContent = '"' + t.trim().split(/\s+/).slice(-3).join(' ') + '"';
     clearTimeout(startListening.t); startListening.t = setTimeout(() => ($('micText').textContent = wordLabel()), 2500);
   });
-  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? wordLabel() : 'Listening';
+  $('micChip').classList.toggle('on', mode !== 'none'); $('micText').textContent = mode === 'none' ? 'Buttons only' : mode === 'words' ? wordLabel() : 'Listening';
   say('Escuchando.');
 }
 // Starts continuous speech recognition. Calls onWord when the trigger word is heard and onHeard with each transcript.
@@ -602,7 +664,7 @@ function startWords(onWord, onHeard) {
 const wordLabel = () => ({ hoyo: 'Say "hoyo"', oioioi: 'Say "oi oi oi"', ayayay: 'Say "ay ay ay"', any: 'Say "hoyo"' })[store.get('word', 'oioioi')];
 function stopListening() {
   listening = false; stopDetector?.(); stopDetector = null; $('level').firstElementChild.style.width = 0;
-  recog?.(); recog = null;
+  recog?.(); recog = null; stopWheel();
   wakeLock?.release?.(); wakeLock = null;
   $('listenBtn').classList.remove('active'); $('listenBtn').setAttribute('aria-pressed', 'false'); $('listenBtn').textContent = 'Drive';
   $('micChip').classList.remove('on'); $('micText').textContent = 'Mic off';
