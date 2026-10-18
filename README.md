@@ -5,7 +5,7 @@ A phone web app (it can be added to the home screen) for flagging road hazards h
 ## What it does
 
 - **Drive mode** keeps the screen on, follows your GPS position and listens to the microphone.
-- **Trigger**: shout your recorded shout (Menu > Record my shout, up to 3 recordings; "Play my shout" plays the latest, "Test my shout" shows a live meter and says "Recognized" without creating flags, and "Shout sensitivity" trades missed shouts against false alarms), or (the default, and most reliable) say a trigger word: "hoyo", "oioioi" or "ay ay ay" (Menu > Listen for, Trigger word). "Test my trigger" works for both. The big red **Flag hazard** button does the same.
+- **Trigger**: say "oi oi oi". Record it 3 times first (Menu > Record "oi oi oi", up to 5 recordings are kept; "Play my recording" plays the latest). The app then listens silently, with no beeps or speech service, and compares each burst of sound with your recordings (`public/kws.js`: mel-cepstrum features with the background subtracted, matched by dynamic time warping). "Test my trigger" shows the sound level, background, length and how different each sound was from your recordings, and says "Recognized" without creating flags. "Sensitivity" trades missed triggers against false alarms. Menu > Listen for can switch to the phone's speech recognition instead ("oi oi oi", "hoyo" or "ay ay ay"), which works too but makes the phone beep. The big red **Flag hazard** button does the same.
 - After a trigger the phone beeps, says "Hoyo marcado" and **saves automatically after 5 seconds** at your location. Before that you can pick the type (pothole, debris, flooding, accident, other), add a photo with the red camera button (this stops the timer; the photo opens on the map after saving). Photos taken at an already-flagged spot are added to that flag, up to 6 per flag, or cancel (tap, or say "cancela" in word mode).
 - If an active flag already exists within 25 m, your flag is added to it as another reporter instead of creating a duplicate.
 - Flags show as a red flag on a yellow circle. Fixed ones turn grey.
@@ -55,13 +55,14 @@ Flags are stored in a free hosted Postgres database (Neon), so they survive rest
 - **Android Auto.** Android Auto only accepts certain app categories (navigation, points of interest, messaging, media). The hazard reporter would be a native Android app built with the Car App Library, using this same server.
 - **Listening with the screen off.** Web apps can't keep the microphone on in the background; the native app will.
 - **Accounts.** Each phone gets an anonymous id, so one person counts once per phone.
-- **Shout matching** needs a sound that is well above the background noise (which it keeps measuring), at least a fraction of your recording's loudness, shaped like your recordings above 300 Hz (to skip engine rumble), and held for about half the length of your shout. It was tuned with synthetic car sounds and still needs real road testing. If it stays unreliable, the next step is a small trained sound recognizer (TensorFlow.js) using several shouts and recordings of car noise.
+- **"Oi oi oi" matching** was tuned with synthetic voices and car noise (other words, talking, "ay ay ay" and engine sound are ignored; the near-identical "ui ui ui" is accepted). It still needs road testing with real voices. It needs a couple of seconds after starting to learn the background sound.
 - **Approximate location**: if the phone reports accuracy worse than 100 m (for example Chrome without "precise location" on Android), the app says so and does not auto-save the flag.
 
 ## Files
 
 - `server.js`: web server, API, KML/GeoJSON export, and storage (Postgres or local files).
 - `public/index.html`: the whole app (map, listening, flags, report).
+- `public/kws.js`: the personal "oi oi oi" detector.
 - `public/vendor/leaflet/`: map library (Leaflet 1.9.4, BSD-2 license), bundled so the app loads without a CDN.
 - `public/manifest.webmanifest`, `public/sw.js`, `public/icon.svg`: home-screen install.
 
