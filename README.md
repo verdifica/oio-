@@ -5,8 +5,8 @@ A phone web app (it can be added to the home screen) for flagging road hazards h
 ## What it does
 
 - **Drive mode** keeps the screen on, follows your GPS position and listens to the microphone.
-- **Trigger**: shout your recorded shout (Menu > Record my shout; "Play my shout" lets you hear the saved one, and "Shout sensitivity" trades missed shouts against false alarms), or say "bache", "hoyo", "pothole" or "oioioi" (Menu > Listen for > Spoken words). The big red **Flag hazard** button does the same.
-- After a trigger the phone beeps, says "Bache marcado" and **saves automatically after 5 seconds** at your location. Before that you can pick the type (pothole, debris, flooding, accident, other), add a photo, or cancel (tap, or say "cancela" in word mode).
+- **Trigger**: shout your recorded shout (Menu > Record my shout, up to 3 recordings; "Play my shout" plays the latest, "Test my shout" shows a live meter and says "Recognized" without creating flags, and "Shout sensitivity" trades missed shouts against false alarms), or say "hoyo", "pothole" or "oioioi" (Menu > Listen for > Spoken words). The big red **Flag hazard** button does the same.
+- After a trigger the phone beeps, says "Hoyo marcado" and **saves automatically after 5 seconds** at your location. Before that you can pick the type (pothole, debris, flooding, accident, other), add a photo with the red camera button (this stops the timer; the photo opens on the map after saving), or cancel (tap, or say "cancela" in word mode).
 - If an active flag already exists within 25 m, your flag is added to it as another reporter instead of creating a duplicate.
 - Flags show as a red flag on a yellow circle. Fixed ones turn grey.
 - Tap a flag for **Still there** (join the reporters), **It's fixed** (vote to clear) and **Claim report**. A flag is marked fixed once "fixed" votes reach half the number of reporters.
@@ -55,7 +55,7 @@ Flags are stored in a free hosted Postgres database (Neon), so they survive rest
 - **Android Auto.** Android Auto only accepts certain app categories (navigation, points of interest, messaging, media). The hazard reporter would be a native Android app built with the Car App Library, using this same server.
 - **Listening with the screen off.** Web apps can't keep the microphone on in the background; the native app will.
 - **Accounts.** Each phone gets an anonymous id, so one person counts once per phone.
-- **Shout matching** compares the frequency shape of the sound (above 300 Hz, to skip engine rumble) to your recording, with a loudness bar set well below the recording because the phone is farther away while driving. It was tuned with synthetic car sounds and still needs real road testing.
+- **Shout matching** needs a sound that is well above the background noise (which it keeps measuring), at least a fraction of your recording's loudness, shaped like your recordings above 300 Hz (to skip engine rumble), and held for about half the length of your shout. It was tuned with synthetic car sounds and still needs real road testing. If it stays unreliable, the next step is a small trained sound recognizer (TensorFlow.js) using several shouts and recordings of car noise.
 - **Approximate location**: if the phone reports accuracy worse than 100 m (for example Chrome without "precise location" on Android), the app says so and does not auto-save the flag.
 
 ## Files
@@ -64,3 +64,11 @@ Flags are stored in a free hosted Postgres database (Neon), so they survive rest
 - `public/index.html`: the whole app (map, listening, flags, report).
 - `public/vendor/leaflet/`: map library (Leaflet 1.9.4, BSD-2 license), bundled so the app loads without a CDN.
 - `public/manifest.webmanifest`, `public/sw.js`, `public/icon.svg`: home-screen install.
+
+## Erase all flags
+
+In the Neon console, open the project's **SQL Editor** and run:
+
+```sql
+TRUNCATE hazards, photos;
+```

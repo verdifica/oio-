@@ -56,6 +56,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .btn { background: var(--line); border-radius: 10px; padding: 12px 16px; font-weight: 600; }
 .btn.primary { background: var(--sign); color: #111; }
 .btn:disabled { opacity: .45; cursor: default; }
+.cam { width: 64px; height: 64px; border-radius: 14px; background: var(--danger); color: #fff; display: grid; place-items: center; flex: none; }
+.cam svg { width: 34px; height: 34px; }
+.thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 2px solid var(--sign); }
+.testpanel { background: var(--asphalt); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+.meter { position: relative; height: 18px; background: var(--line); border-radius: 9px; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--sign); }
+.meter b { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--text); left: 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--text); }
+.tresult { font: 800 26px/1.1 var(--display); text-transform: uppercase; color: var(--muted); }
+.tresult.hit { color: var(--ok); }
 .btn.red { background: var(--danger); color: #fff; }
 .btn.green { background: var(--ok); color: #08130b; }
 .btn.grow { flex: 1; }
@@ -108,9 +119,10 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     </div>
     <div class="row types" id="typeRow" role="group" aria-label="Hazard type"></div>
     <div class="row">
-      <label class="btn" for="photoInput" style="display:inline-block;color:var(--text)">Add photo</label>
+      <button class="cam" id="photoBtn" type="button" aria-label="Add photo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l1.6 2.4H20a1.5 1.5 0 0 1 1.5 1.5v10.6A1.5 1.5 0 0 1 20 20H4a1.5 1.5 0 0 1-1.5-1.5V7.9A1.5 1.5 0 0 1 4 6.4h3.4z" fill="currentColor"/><circle cx="12" cy="13" r="4.2" fill="var(--panel)"/><circle cx="12" cy="13" r="2.6" fill="currentColor"/></svg></button>
       <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
-      <span id="photoName" style="align-self:center;color:var(--muted)"></span>
+      <img id="photoPreview" class="thumb" alt="Attached photo" hidden>
+      <span id="photoName" style="align-self:center;color:var(--muted)">Add a photo (stops the timer)</span>
     </div>
     <div class="row">
       <button class="btn red grow" id="cancelFlag">Cancel</button>
@@ -125,13 +137,25 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
     <div class="row" style="justify-content:space-between;align-items:center"><h2 id="menuTitle">Settings</h2><button class="btn" data-close>Close</button></div>
 
     <div class="section-label">Your trigger</div>
-    <p>Record the shout you want to use. While driving, OIOIOI listens for a loud sound that matches it. You can also say a word like "bache", "pothole" or "oioioi".</p>
+    <p>Record the shout you want to use, ideally 3 times, with the phone where it sits while you drive. OIOIOI then listens for a sound that is much louder than the background and shaped like your shout. You can also say a word like "hoyo", "pothole" or "oioioi".</p>
     <div class="row">
       <button class="btn primary" id="recordScream">Record my shout (3 s)</button>
       <button class="btn" id="playScream" disabled>Play my shout</button>
+      <button class="btn" id="testScream">Test my shout</button>
+      <button class="btn" id="deleteScream" disabled>Delete recordings</button>
     </div>
     <p id="screamInfo"></p>
-    <p>Record it with the phone where it sits while you drive. In Drive mode the bar next to "Listening" turns green when it hears your shout.</p>
+    <div class="testpanel" id="testPanel" hidden>
+      <div class="meter" aria-hidden="true"><i id="tLevel"></i><b id="tThresh"></b></div>
+      <div class="stats">
+        <span>Loudness <b id="tLoud">–</b></span>
+        <span>Background <b id="tNoise">–</b></span>
+        <span>Shape match <b id="tMatch">–</b></span>
+        <span>Held <b id="tHeld">–</b></span>
+      </div>
+      <div class="tresult" id="tResult" role="status">Shout now</div>
+      <p>The bar must pass the white line, and "Shape match" must turn green, for long enough. Practice until you see "Recognized" every time, and try talking or playing the radio to check it stays quiet.</p>
+    </div>
     <label>Shout sensitivity
       <select id="sensitivity">
         <option value="low">Low: fewer false alarms</option>
@@ -185,6 +209,7 @@ pre.report { white-space: pre-wrap; background: #f7f5ee; color: #1a1a1a; padding
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
+const TYPES_ES = { pothole: 'Hoyo', debris: 'Escombros', flooding: 'Inundación', accident: 'Accidente', other: 'Otro peligro' };
 const TYPES = { pothole: 'Pothole', debris: 'Debris', flooding: 'Flooding', accident: 'Accident', other: 'Other danger' };
 const WORDS = /\b(bache|hoyo|pothole|oi ?oi ?oi|ay ay ay|peligro|danger|hazard)\b/i;
 const WARN_RADIUS_M = 200, DEDUPE_RADIUS_M = 25, AUTO_SAVE_S = 5, APPROX_M = 100;
@@ -325,10 +350,10 @@ function openFlag(source, at) {
   const c = at || pos;
   pending = { lat: c.lat, lng: c.lng, accuracy: at ? null : pos.acc, heading: at ? null : pos.heading, type: 'pothole', photo: null };
   beep(1040, 200);
-  if (source !== 'button') say('Bache marcado. Guardando en cinco segundos.');
+  if (source !== 'button') say('Hoyo marcado. Guardando en cinco segundos.');
   const rough = !at && pos.acc > APPROX_M;
   $('confirmWhere').textContent = at ? 'Where you tapped (testing mode)' : rough ? `Location is approximate (±${Math.round(pos.acc)} m). Check the spot before saving.` : `At your location (±${Math.round(pos.acc)} m)`;
-  $('photoName').textContent = '';
+  $('photoName').textContent = 'Add a photo (stops the timer)'; $('photoPreview').hidden = true; $('photoPreview').removeAttribute('src');
   renderTypes();
   $('confirmSheet').hidden = false;
   if (rough) { $('countdown').textContent = '–'; return; } // don't auto-save a flag in the wrong place
@@ -340,10 +365,13 @@ function renderTypes() {
   $('typeRow').innerHTML = Object.entries(TYPES).map(([k, v]) => `<button aria-pressed="${pending.type === k}" data-type="${k}">${v}</button>`).join('');
 }
 $('typeRow').addEventListener('click', (e) => { const k = e.target.dataset.type; if (!k) return; pending.type = k; stopCountdown(); renderTypes(); });
+// Opening the camera stops the timer, so the flag can't save before the photo is taken.
+$('photoBtn').onclick = () => { stopCountdown(); $('photoInput').click(); };
 $('photoInput').addEventListener('change', async (e) => {
   const f = e.target.files[0]; if (!f || !pending) return;
   stopCountdown();
-  pending.photo = await shrink(f); $('photoName').textContent = 'Photo attached';
+  pending.photo = await shrink(f);
+  $('photoPreview').src = pending.photo; $('photoPreview').hidden = false; $('photoName').textContent = 'Photo attached. Tap Save.';
   e.target.value = '';
 });
 async function shrink(file) {
@@ -363,6 +391,7 @@ async function saveFlag() {
     if (near) { await vote(near.id, 'confirm'); say('Ya estaba reportado. Te añadimos como reclamante.'); return; }
     const h = await api('hazards', p);
     hazards.push(h); render(); toast('Hazard saved'); beep(1320, 120);
+    if (h.hasPhoto) { map.panTo([h.lat, h.lng]); markers.get(h.id)?.openPopup(); } // show the saved photo
   } catch (e) { toast('Could not save: ' + e.message); say('No se pudo guardar'); }
 }
 $('saveFlag').onclick = saveFlag;
@@ -371,76 +400,159 @@ $('flag').onclick = () => { startGps(); openFlag('button'); };
 map.on('click', (e) => { if ($('placeByTap').checked) openFlag('button', e.latlng); });
 
 // ---------- listening: shout detector + optional speech words ----------
-let listening = false, micStream, analyser, rafId, listenT, recog, wakeLock, lastTrigger = 0;
-let scream = store.get('scream'); // { rms, profile: [dB per band, centered], ms, v: 2 }
-if (scream && scream.v !== 2) scream = null; // older recordings used a different format
-let screamAudio = store.get('screamAudio'); // data URL of the recorded shout, for playback
-const SENS = { low: { loud: .35, match: .75, ms: 300 }, medium: { loud: .2, match: .65, ms: 200 }, high: { loud: .1, match: .5, ms: 150 } };
+let listening = false, recog, wakeLock, lastTrigger = 0, stopDetector = null, stopTest = null;
+// Saved shout: averaged over up to 3 recordings. { v: 3, samples: [{ rms, ms, profile }] }
+let scream = store.get('scream');
+if (scream && scream.v !== 3) scream = null; // older recordings used a different format
+let screamAudio = store.get('screamAudio'); // data URL of the latest recording, for playback
+// snr: how far above the background noise; loud: fraction of the recorded loudness; match: shape similarity; dur: fraction of the shout's length.
+const SENS = { low: { snr: 5, loud: .25, match: .75, dur: .6 }, medium: { snr: 3.5, loud: .15, match: .7, dur: .5 }, high: { snr: 2.5, loud: .08, match: .6, dur: .4 } };
+function screamModel() {
+  if (!scream?.samples?.length) return null;
+  const n = scream.samples.length;
+  return {
+    n, rms: Math.min(...scream.samples.map((x) => x.rms)), ms: scream.samples.reduce((a, x) => a + x.ms, 0) / n,
+    profile: BANDS.map((_, i) => scream.samples.reduce((a, x) => a + x.profile[i], 0) / n),
+  };
+}
 function screamLabel() {
-  $('screamInfo').textContent = scream ? `Shout saved (${(scream.ms / 1000).toFixed(1)} s)` : 'No shout recorded yet. Any very loud shout will trigger.';
-  $('playScream').disabled = !screamAudio;
+  const n = scream?.samples?.length || 0;
+  $('screamInfo').textContent = n ? `${n} recording${n > 1 ? 's' : ''} saved${n < 3 ? '. Record ' + (3 - n) + ' more for better recognition.' : '.'}` : 'No shout recorded yet. Until you record one, any very loud sound will trigger.';
+  $('playScream').disabled = !screamAudio; $('deleteScream').disabled = !n;
 }
 $('triggerMode').value = store.get('mode', 'shout');
 $('triggerMode').onchange = (e) => { store.set('mode', e.target.value); if (listening) { stopListening(); startListening(); } };
 $('sensitivity').value = store.get('sens', 'medium');
-$('sensitivity').onchange = (e) => { store.set('sens', e.target.value); if (listening) { stopListening(); startListening(); } };
+$('sensitivity').onchange = (e) => { store.set('sens', e.target.value); if (listening) { stopListening(); startListening(); } if (stopTest) { toggleTest(); toggleTest(); } };
 
 const BANDS = [[300, 500], [500, 800], [800, 1200], [1200, 1800], [1800, 2600], [2600, 3600], [3600, 5000]];
 // Below 300 Hz is mostly engine and road rumble, so it is left out of the comparison.
-function frame(an, freq, time) {
-  an.getFloatTimeDomainData(time);
-  let sum = 0; for (const v of time) sum += v * v;
-  const rms = Math.sqrt(sum / time.length);
-  an.getFloatFrequencyData(freq);
-  const hz = an.context.sampleRate / 2 / freq.length;
+function frame(m) {
+  m.analyser.getFloatTimeDomainData(m.time);
+  let sum = 0; for (const v of m.time) sum += v * v;
+  const rms = Math.sqrt(sum / m.time.length);
+  m.analyser.getFloatFrequencyData(m.freq);
+  const hz = m.analyser.context.sampleRate / 2 / m.freq.length;
   // Average power per band in dB, centered on its mean, so the shape matters and not the volume.
-  const db = BANDS.map(([a, b]) => { let s = 0, n = 0; for (let i = Math.floor(a / hz); i < Math.ceil(b / hz); i++) { s += 10 ** (freq[i] / 10); n++; } return 10 * Math.log10(s / n + 1e-12); });
+  const db = BANDS.map(([a, b]) => { let s = 0, n = 0; for (let i = Math.floor(a / hz); i < Math.ceil(b / hz); i++) { s += 10 ** (m.freq[i] / 10); n++; } return 10 * Math.log10(s / n + 1e-12); });
   const mean = db.reduce((x, y) => x + y, 0) / db.length;
   return { rms, prof: db.map((x) => x - mean) };
 }
-// Correlation of two centered profiles: 1 = same shape, 0 = unrelated.
 const spread = (a) => Math.sqrt(a.reduce((s, x) => s + x * x, 0) / a.length);
+// Correlation of two centered profiles: 1 = same shape, 0 = unrelated.
 const similarity = (a, b) => { let d = 0, na = 0, nb = 0; a.forEach((x, i) => { d += x * b[i]; na += x * x; nb += b[i] * b[i]; }); return d / Math.sqrt(na * nb || 1); };
-async function openMic() {
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-  actx = actx || new AudioContext(); await actx.resume();
-  analyser = actx.createAnalyser(); analyser.fftSize = 2048;
-  actx.createMediaStreamSource(micStream).connect(analyser);
-  return { freq: new Float32Array(analyser.frequencyBinCount), time: new Float32Array(analyser.fftSize) };
+const dbfs = (rms) => 20 * Math.log10(rms + 1e-9);
+
+// One shared microphone for Drive, Test and Record. It is reopened only if the browser ended it,
+// and released when nothing uses it, so the next recording always gets a working microphone.
+let mic = null;
+async function getMic(user) {
+  if (!mic || !mic.stream.getAudioTracks().some((t) => t.readyState === 'live')) {
+    releaseMic(null, true);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    actx = actx || new AudioContext();
+    const analyser = actx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = .5;
+    const src = actx.createMediaStreamSource(stream); src.connect(analyser);
+    mic = { stream, src, analyser, freq: new Float32Array(analyser.frequencyBinCount), time: new Float32Array(analyser.fftSize), users: new Set() };
+  }
+  if (actx.state !== 'running') await actx.resume();
+  mic.users.add(user);
+  return mic;
 }
-function closeMic() { cancelAnimationFrame(rafId); clearInterval(listenT); micStream?.getTracks().forEach((t) => t.stop()); micStream = null; $('level').firstElementChild.style.width = 0; }
+function releaseMic(user, force) {
+  if (!mic) return;
+  mic.users.delete(user);
+  if (mic.users.size && !force) return;
+  try { mic.src.disconnect(); } catch {}
+  mic.stream.getTracks().forEach((t) => t.stop());
+  mic = null;
+}
+
+// Listens for the saved shout. Calls onFrame with live values and onHit when the shout is recognized.
+async function startDetector(user, onHit, onFrame) {
+  const m = await getMic(user);
+  const sens = SENS[store.get('sens', 'medium')] || SENS.medium;
+  const model = screamModel();
+  const needMs = model ? Math.min(800, Math.max(200, model.ms * sens.dur)) : 300;
+  let noise = null, heldMs = 0, last = performance.now(), t0 = last;
+  // A timer instead of animation frames, so listening keeps going when the screen dims.
+  const timer = setInterval(() => {
+    const now = performance.now(), dt = Math.min(300, now - last); last = now;
+    const f = frame(m);
+    // Background level follows quiet moments slowly and drops quickly, so a shout doesn't raise it.
+    if (noise == null) noise = f.rms;
+    else if (f.rms < noise) noise = noise * .8 + f.rms * .2;
+    else if (f.rms < noise * 2) noise = noise * .98 + f.rms * .02;
+    const thresh = Math.max(.015, noise * sens.snr, model ? model.rms * sens.loud : .2);
+    const loud = f.rms > thresh;
+    const sim = model ? similarity(f.prof, model.profile) : 1;
+    // A flat sound (wind, hiss) has no shape to compare, so it must be at least half as "shaped" as the shout.
+    const match = !model || (sim > sens.match && spread(f.prof) > spread(model.profile) / 2);
+    heldMs = loud && match ? heldMs + dt : Math.max(0, heldMs - dt);
+    const warm = now - t0 > 1000; // learn the background for a second first
+    onFrame?.({ rms: f.rms, noise, thresh, sim, match, loud, heldMs, needMs });
+    if (warm && heldMs >= needMs) { heldMs = 0; onHit(); }
+  }, 40);
+  return () => { clearInterval(timer); releaseMic(user); };
+}
 
 $('recordScream').onclick = async () => {
-  const wasListening = listening; if (wasListening) stopListening();
+  if (stopTest) toggleTest();
+  const btn = $('recordScream'); if (btn.disabled) return; btn.disabled = true;
+  let m = null;
   try {
-    const buf = await openMic(); const frames = [];
-    let rec = null, chunks = [];
-    try { rec = new MediaRecorder(micStream); rec.ondataavailable = (e) => chunks.push(e.data); rec.start(); } catch { rec = null; }
-    $('recordScream').textContent = 'Shout now…'; beep(990, 150);
-    const t0 = performance.now(), end = t0 + 3000;
-    await new Promise((done) => { (function loop() { const f = frame(analyser, buf.freq, buf.time); f.t = performance.now(); frames.push(f); f.t < end ? (rafId = requestAnimationFrame(loop)) : done(); })(); });
-    const audio = rec ? await new Promise((done) => { rec.onstop = () => done(new Blob(chunks, { type: rec.mimeType })); rec.stop(); }) : null;
-    closeMic();
+    m = await getMic('record');
+    let rec = null; const chunks = [];
+    try { rec = new MediaRecorder(m.stream); rec.ondataavailable = (e) => chunks.push(e.data); rec.start(); } catch { rec = null; }
+    btn.textContent = 'Shout now…'; beep(990, 150);
+    const frames = []; const end = performance.now() + 3000;
+    await new Promise((done) => { const t = setInterval(() => { const f = frame(m); f.t = performance.now(); frames.push(f); if (f.t >= end) { clearInterval(t); done(); } }, 20); });
+    const audio = rec ? await new Promise((done) => { rec.onstop = () => done(new Blob(chunks, { type: rec.mimeType })); setTimeout(() => done(null), 1500); try { rec.stop(); } catch { done(null); } }) : null;
     // Keep only the shout itself: frames louder than half of the peak.
     const peak = Math.max(...frames.map((f) => f.rms));
     const shout = frames.filter((f) => f.rms > peak / 2);
-    if (peak < .03 || shout.length < 3) { toast('That was too quiet or too short. Try again.'); }
+    if (peak < .03 || shout.length < 4) toast('That was too quiet or too short. Try again.');
     else {
       const rmsSorted = shout.map((f) => f.rms).sort((a, b) => a - b);
-      scream = { v: 2, rms: rmsSorted[Math.floor(rmsSorted.length / 2)], ms: Math.min(2000, shout[shout.length - 1].t - shout[0].t + 16),
-        profile: BANDS.map((_, i) => shout.reduce((s, f) => s + f.prof[i], 0) / shout.length) };
+      const sample = { rms: rmsSorted[Math.floor(rmsSorted.length / 2)], ms: Math.min(2000, shout[shout.length - 1].t - shout[0].t + 20),
+        profile: BANDS.map((_, i) => shout.reduce((a, f) => a + f.prof[i], 0) / shout.length) };
+      scream = { v: 3, samples: [...(scream?.samples || []), sample].slice(-3) };
       store.set('scream', scream);
       if (audio && audio.size < 300e3) {
         screamAudio = await new Promise((done) => { const r = new FileReader(); r.onload = () => done(r.result); r.readAsDataURL(audio); });
         store.set('screamAudio', screamAudio);
       }
-      toast('Shout saved. Tap "Play my shout" to hear it.');
+      toast(`Shout ${scream.samples.length} of 3 saved.`);
     }
-  } catch (e) { toast('Microphone not available: ' + e.message); }
-  $('recordScream').textContent = 'Record my shout (3 s)'; screamLabel();
-  if (wasListening) startListening();
+  } catch (e) { toast('Microphone not available: ' + (e.name || '') + ' ' + e.message, 6000); }
+  if (m) releaseMic('record');
+  btn.textContent = 'Record my shout (3 s)'; btn.disabled = false; screamLabel();
 };
 $('playScream').onclick = () => { if (screamAudio) new Audio(screamAudio).play().catch(() => toast('Could not play the recording')); };
+$('deleteScream').onclick = () => { scream = null; screamAudio = null; store.set('scream', null); store.set('screamAudio', null); screamLabel(); toast('Recordings deleted'); };
+
+// Test mode: same detector as Drive, but it only shows what it hears and never creates a flag.
+let hits = 0;
+async function toggleTest() {
+  if (stopTest) { const s = stopTest; stopTest = null; s(); $('testPanel').hidden = true; $('testScream').textContent = 'Test my shout'; return; }
+  if (listening) stopListening();
+  hits = 0; $('testPanel').hidden = false; $('testScream').textContent = 'Stop test'; $('tResult').textContent = 'Shout now'; $('tResult').classList.remove('hit');
+  const pct = (rms) => Math.max(0, Math.min(100, (dbfs(rms) + 70) / 70 * 100)); // meter shows -70 to 0 dB
+  try {
+    stopTest = await startDetector('test', () => {
+      hits++; beep(1320, 150);
+      $('tResult').textContent = `Recognized ✓ (${hits})`; $('tResult').classList.add('hit');
+      clearTimeout(toggleTest.t); toggleTest.t = setTimeout(() => { $('tResult').textContent = 'Shout now'; $('tResult').classList.remove('hit'); }, 1500);
+    }, (v) => {
+      $('tLevel').style.width = pct(v.rms) + '%'; $('tLevel').style.background = v.loud && v.match ? 'var(--ok)' : 'var(--sign)';
+      $('tThresh').style.left = pct(v.thresh) + '%';
+      $('tLoud').textContent = Math.round(dbfs(v.rms)) + ' dB'; $('tNoise').textContent = Math.round(dbfs(v.noise)) + ' dB';
+      $('tMatch').textContent = Math.round(v.sim * 100) + '%'; $('tMatch').style.color = v.match ? 'var(--ok)' : '';
+      $('tHeld').textContent = `${Math.round(v.heldMs)} / ${Math.round(v.needMs)} ms`;
+    });
+  } catch (e) { toast('Microphone not available: ' + (e.name || '') + ' ' + e.message, 6000); stopTest = null; $('testPanel').hidden = true; $('testScream').textContent = 'Test my shout'; }
+}
+$('testScream').onclick = toggleTest;
 
 function trigger(src) {
   if (Date.now() - lastTrigger < 8000 || pending) return;
@@ -451,37 +563,22 @@ function trigger(src) {
 
 async function startListening() {
   const mode = store.get('mode', 'shout');
+  if (stopTest) toggleTest();
   listening = true; $('listenBtn').classList.add('active'); $('listenBtn').setAttribute('aria-pressed', 'true'); $('listenBtn').textContent = 'Stop';
   startGps();
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
   if (mode !== 'words') {
+    const bar = $('level').firstElementChild;
     try {
-      const buf = await openMic();
-      const sens = SENS[store.get('sens', 'medium')] || SENS.medium;
-      // Phones sit farther from your mouth in the car than when recording, so the loudness bar is set well below the recording.
-      const thresh = scream ? Math.min(.12, Math.max(.03, scream.rms * sens.loud)) : .2;
-      const needMs = scream ? Math.min(sens.ms, scream.ms * .6) : 250;
-      const bar = $('level').firstElementChild;
-      let heldMs = 0, last = performance.now();
-      // A timer instead of animation frames, so listening keeps going when the screen dims.
-      clearInterval(listenT);
-      listenT = setInterval(() => {
-        const now = performance.now(), dt = Math.min(300, now - last); last = now;
-        const f = frame(analyser, buf.freq, buf.time);
-        const loud = f.rms > thresh;
-        // A flat sound (wind, hiss) has no shape to compare, so it must be at least half as "shaped" as the shout.
-        const match = !scream || (similarity(f.prof, scream.profile) > sens.match && spread(f.prof) > spread(scream.profile) / 2);
-        bar.style.width = Math.min(100, f.rms / thresh * 100) + '%';
-        bar.style.background = loud && match ? 'var(--ok)' : 'var(--sign)';
-        heldMs = loud && match ? heldMs + dt : Math.max(0, heldMs - dt / 2);
-        window.oioDebug = { rms: f.rms, thresh, sim: scream ? similarity(f.prof, scream.profile) : 1, heldMs, needMs };
-        if (heldMs >= needMs) { heldMs = 0; trigger('shout'); }
-      }, 40);
+      stopDetector = await startDetector('drive', () => trigger('shout'), (v) => {
+        bar.style.width = Math.min(100, v.rms / v.thresh * 100) + '%';
+        bar.style.background = v.loud && v.match ? 'var(--ok)' : 'var(--sign)';
+      });
     } catch (e) { toast('Microphone blocked: ' + e.message); }
   }
   if (mode !== 'shout') startWords();
-  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? 'Say "bache"' : 'Listening';
-  say('Escuchando. Grita para marcar un bache.');
+  $('micChip').classList.add('on'); $('micText').textContent = mode === 'words' ? 'Say "hoyo"' : 'Listening';
+  say('Escuchando. Grita para marcar un hoyo.');
 }
 function startWords() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -492,7 +589,7 @@ function startWords() {
   try { recog.start(); } catch {}
 }
 function stopListening() {
-  listening = false; closeMic();
+  listening = false; stopDetector?.(); stopDetector = null; $('level').firstElementChild.style.width = 0;
   if (recog) { const r = recog; recog = null; r.onend = null; try { r.stop(); } catch {} }
   wakeLock?.release?.(); wakeLock = null;
   $('listenBtn').classList.remove('active'); $('listenBtn').setAttribute('aria-pressed', 'false'); $('listenBtn').textContent = 'Drive';
@@ -511,7 +608,7 @@ function reportText(h) {
   const car = [p.make, p.model, p.year].filter(Boolean).join(' ');
   return `REPORTE DE CONDICIÓN PELIGROSA EN LA VÍA / ROAD HAZARD REPORT
 
-Tipo / Type: ${TYPES[h.type] || h.type}
+Tipo / Type: ${TYPES_ES[h.type] || h.type} / ${TYPES[h.type] || h.type}
 Fecha y hora / Date & time: ${d.toLocaleString('es-PR')}
 Ubicación / Location: ${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}${h.accuracy ? ` (±${Math.round(h.accuracy)} m)` : ''}
 Mapa / Map: https://www.google.com/maps?q=${h.lat.toFixed(6)},${h.lng.toFixed(6)}
@@ -540,6 +637,7 @@ $('shareReport').onclick = async () => {
 
 // ---------- sheets ----------
 $('menuBtn').onclick = () => { screamLabel(); $('menuSheet').hidden = false; };
+$('menuSheet').querySelector('[data-close]').addEventListener('click', () => { if (stopTest) toggleTest(); });
 document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => (b.closest('.sheet').hidden = true)));
 
 // ---------- boot ----------
