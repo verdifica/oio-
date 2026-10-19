@@ -3,7 +3,7 @@
 A native Android app for the same server. GitHub Actions builds it on every push to `main` that touches `android/`
 and publishes the APK at https://github.com/verdifica/oio-/releases/download/android-latest/oioioi.apk
 
-- **Opening the app makes a report** (`ReportActivity.kt`, `ReportFlow.kt`): say "Hey Google, open OIOIOI" (or tap the
+- **Opening the app makes a report** (`ReportActivity.kt`, `ReportFlow.kt`): say "Hey Google, open Reportar Hoyo" or "open Pothole Report" (or tap the
   icon). It finds the position, says "Reportando hoyo", and saves after 5 seconds unless cancelled; the driver can pick
   the type or add a photo first. Reports stay on the phone (`Reports.kt`), with the street address when the phone can
   look it up, and a bilingual claim report that can be shared with the photos.

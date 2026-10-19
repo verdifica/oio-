@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="OIOIOI"
+        android:label="Reportar Hoyo"
         android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="false">
@@ -29,6 +29,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- A second name on the phone, in English, so either works with "Hey Google, open …". -->
+        <activity-alias
+            android:name=".PotholeReport"
+            android:targetActivity=".ReportActivity"
+            android:label="Pothole Report"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- The earlier shared-map version (web app + Drive mode). Not linked from the app for now. -->
         <activity
