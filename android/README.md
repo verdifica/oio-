@@ -3,13 +3,14 @@
 A native Android app for the same server. GitHub Actions builds it on every push to `main` that touches `android/`
 and publishes the APK at https://github.com/verdifica/oio-/releases/download/android-latest/oioioi.apk
 
-- **Phone screen**: the web app (map, flags, photos, reports) in a WebView.
-- **Drive mode** (`DriveService.kt`): a foreground service, so it keeps working with the screen off or another app
-  open. It follows GPS, listens silently for "oi, oi, oi" (or "hoyo" said alone) with the offline Vosk recognizer,
-  says "Hoyo marcado" and saves after 5 seconds (say "cancela" or tap Cancel in the notification), and warns about
-  hazards ahead. The notification has Flag hazard and Stop buttons. Optional steering-wheel button.
-- **Android Auto** (`car/OioiCarAppService.kt`): a points-of-interest app showing nearby hazards on a map with
-  **Flag hazard** and **Drive** buttons.
+- **Opening the app makes a report** (`ReportActivity.kt`, `ReportFlow.kt`): say "Hey Google, open OIOIOI" (or tap the
+  icon). It finds the position, says "Reportando hoyo", and saves after 5 seconds unless cancelled; the driver can pick
+  the type or add a photo first. Reports stay on the phone (`Reports.kt`), with the street address when the phone can
+  look it up, and a bilingual claim report that can be shared with the photos.
+- **Android Auto** (`car/OioiCarAppService.kt`): opening OIOIOI on the car screen starts a report the same way, with
+  Guardar / Cancelar buttons.
+- The earlier shared-map version (`MainActivity.kt` web view + `DriveService.kt` silent "oi oi oi" Drive mode) is still
+  in the code but not linked from the app.
 
 ## Install for testing
 
