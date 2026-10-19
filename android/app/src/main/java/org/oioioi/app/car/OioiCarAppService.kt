@@ -83,9 +83,10 @@ class ReportScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
         }
         val b = MessageTemplate.Builder(message).setTitle("Hoyo Hoyo").setHeaderAction(Action.APP_ICON)
         when (f.state) {
-            ReportFlow.State.SAVED, ReportFlow.State.CANCELLED ->
+            ReportFlow.State.SAVED, ReportFlow.State.CANCELLED -> {
                 b.addAction(Action.Builder().setTitle("Nuevo reporte").setOnClickListener { newReport() }.build())
                 b.addAction(Action.Builder().setTitle("Mis reportes").setOnClickListener { screenManager.push(ReportsScreen(carContext)) }.build())
+            }
             else -> {
                 b.addAction(Action.Builder().setTitle("Guardar").setOnClickListener { f.saveNow() }.build())
                 b.addAction(Action.Builder().setTitle("Cancelar").setOnClickListener { f.cancel() }.build())
