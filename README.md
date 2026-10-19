@@ -53,7 +53,7 @@ Flags are stored in a free hosted Postgres database (Neon), so they survive rest
 
 ## Not in this prototype yet
 
-- **Android Auto.** Android Auto only accepts certain app categories (navigation, points of interest, messaging, media). The hazard reporter would be a native Android app built with the Car App Library, using this same server.
+- **Android Auto**: see the native app in [`android/`](android/README.md). Its APK is built by GitHub Actions and published at https://github.com/verdifica/oio-/releases/download/android-latest/oioioi.apk
 - **Listening with the screen off.** Web apps can't keep the microphone on in the background; the native app will.
 - **Accounts.** Each phone gets an anonymous id, so one person counts once per phone.
 - **"Oi oi oi" recognition** was tested with synthetic Spanish voices (espeak) over car noise: every "oi, oi, oi" was recognized, and a minute of everyday talk full of "hoy", "voy" and "oye" never triggered it. Real voices on the road still need testing. Said very fast as one sound ("oioioi") it can be missed.
