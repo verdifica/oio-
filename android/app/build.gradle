@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace 'org.oioioi.app'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId 'org.oioioi.app'
         minSdk 26
-        targetSdk 34
-        versionCode 4
-        versionName '0.4'
+        targetSdk 36
+        versionCode 5
+        versionName '0.5'
         buildConfigField 'String', 'SERVER', '"https://oioioi-uta4.onrender.com/"'
     }
     signingConfigs {
@@ -23,9 +23,34 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Optional private Google Play upload key from GitHub secrets. Without it, Play uploads are signed with the
+        // test key above: fine for private testing, because Google re-signs the app and uploading needs the owner's
+        // Play Console login. Set the secrets before a public release.
+        if (System.getenv('UPLOAD_KEYSTORE')) {
+            upload {
+                storeFile file(System.getenv('UPLOAD_KEYSTORE'))
+                storePassword System.getenv('UPLOAD_PASSWORD')
+                keyAlias 'upload'
+                keyPassword System.getenv('UPLOAD_PASSWORD')
+            }
+        }
     }
     buildTypes {
         debug { signingConfig signingConfigs.debug }
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('UPLOAD_KEYSTORE') ? signingConfigs.upload : signingConfigs.debug
+        }
+    }
+    // phone: the app for the phone (and Android Auto). car: installed on the car itself from Google Play.
+    flavorDimensions 'device'
+    productFlavors {
+        phone { dimension 'device' }
+        car {
+            dimension 'device'
+            // Play needs different version numbers for the phone and car releases of the same app.
+            versionCode 1000000 + defaultConfig.versionCode
+        }
     }
     buildFeatures { buildConfig true }
     compileOptions {
@@ -33,7 +58,8 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = '17' }
-    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/voskAssets'))
+    // Only the phone app listens for "oi oi oi", so only it carries the speech model.
+    sourceSets.phone.assets.srcDir(layout.buildDirectory.dir('generated/voskAssets'))
 }
 
 // The Spanish speech model is the same file the web app uses. It is unpacked into the app's assets at build time.
@@ -53,6 +79,7 @@ dependencies {
     implementation 'androidx.car.app:app:1.4.0'
     implementation 'androidx.core:core:1.13.1'
     implementation 'androidx.lifecycle:lifecycle-common:2.6.2'
-    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
-    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    phoneImplementation 'com.alphacephei:vosk-android:0.3.47@aar'
+    phoneImplementation 'net.java.dev.jna:jna:5.13.0@aar'
+    carImplementation 'androidx.car.app:app-automotive:1.4.0'
 }

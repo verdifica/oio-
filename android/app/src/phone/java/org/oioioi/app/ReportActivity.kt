@@ -50,7 +50,7 @@ class ReportActivity : Activity() {
         // Let a voice command open it over the lock screen.
         if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(28), dp(20), dp(28)) }
-        setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(root) })
+        setContentView(ScrollView(this).apply { setBackgroundColor(bg); fitsSystemWindows = true; addView(root) }) // keep clear of the status bar
         val wanted = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1)

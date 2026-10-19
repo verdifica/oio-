@@ -20,18 +20,30 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
-      - name: Build the APK
-        run: gradle -p android assembleDebug --stacktrace
-      - run: cp android/app/build/outputs/apk/debug/app-debug.apk oioioi.apk
+          gradle-version: '8.13'
+      # Optional private upload key for Google Play (repository secrets UPLOAD_KEYSTORE_B64 and UPLOAD_PASSWORD).
+      - name: Upload key
+        env:
+          KEY_B64: ${{ secrets.UPLOAD_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEY_B64" ]; then echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"; echo "UPLOAD_KEYSTORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"; fi
+      - name: Build the phone APK and the car bundle for Google Play
+        env:
+          UPLOAD_PASSWORD: ${{ secrets.UPLOAD_PASSWORD }}
+        run: gradle -p android assemblePhoneDebug bundleCarRelease --stacktrace
+      - run: |
+          cp android/app/build/outputs/apk/phone/debug/app-phone-debug.apk oioioi.apk
+          cp android/app/build/outputs/bundle/carRelease/app-car-release.aab hoyohoyo-car.aab
       - uses: actions/upload-artifact@v4
         with:
-          name: oioioi-apk
-          path: oioioi.apk
-      # A fixed download link for the phone: .../releases/download/android-latest/oioioi.apk
-      - name: Publish the download
+          name: hoyohoyo
+          path: |
+            oioioi.apk
+            hoyohoyo-car.aab
+      # Fixed download links: .../releases/download/android-latest/oioioi.apk and hoyohoyo-car.aab
+      - name: Publish the downloads
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest oioioi.apk --prerelease --title "OIOIOI Android (latest test build)" --notes "Test build from ${GITHUB_SHA::7}. Install on the phone, then enable unknown sources in Android Auto developer settings to see it in the car."
+          gh release create android-latest oioioi.apk hoyohoyo-car.aab --prerelease --title "Hoyo Hoyo Android (latest test build)" --notes "Test build from ${GITHUB_SHA::7}. oioioi.apk: install on the phone. hoyohoyo-car.aab: upload to Google Play Console (Android Automotive OS track) to install on a car with Google built-in."

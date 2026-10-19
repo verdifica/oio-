@@ -113,7 +113,6 @@ class ReportFlow(private val ctx: Context, private val onChange: () -> Unit) : L
             ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         val lm = ctx.getSystemService(LocationManager::class.java)
         // A recent fix is good enough to start with; a fresh GPS fix replaces it as soon as it arrives.
-        DriveService.instance?.location?.let { if (System.currentTimeMillis() - it.time < 30000) location = it }
         for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
             try {
                 if (lm.isProviderEnabled(p)) lm.requestLocationUpdates(p, 1000L, 0f, this, Looper.getMainLooper())
