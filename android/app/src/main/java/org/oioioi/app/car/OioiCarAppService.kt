@@ -1,39 +1,23 @@
 package org.oioioi.app.car
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
 import android.os.Handler
 import android.os.Looper
 import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
-import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.model.Action
-import androidx.car.app.model.ActionStrip
-import androidx.car.app.model.CarLocation
-import androidx.car.app.model.ItemList
-import androidx.car.app.model.Metadata
-import androidx.car.app.model.Place
-import androidx.car.app.model.PlaceListMapTemplate
-import androidx.car.app.model.PlaceMarker
-import androidx.car.app.model.Row
+import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.validation.HostValidator
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import org.json.JSONObject
-import org.oioioi.app.Api
-import org.oioioi.app.DriveService
-import org.oioioi.app.Geo
-import org.oioioi.app.HazardStore
+import org.oioioi.app.ReportFlow
+import java.util.Locale
 
-/** Android Auto entry point. */
+/** Android Auto entry point. Opening OIOIOI on the car screen ("Hey Google, open OIOIOI") starts a report. */
 class OioiCarAppService : CarAppService() {
     override fun createHostValidator(): HostValidator =
         // Test builds accept any Android Auto host (needed for sideloading with developer mode).
@@ -41,96 +25,55 @@ class OioiCarAppService : CarAppService() {
         else HostValidator.Builder(applicationContext).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
 
     override fun onCreateSession(): Session = object : Session() {
-        override fun onCreateScreen(intent: Intent): Screen = HazardScreen(carContext)
+        private var screen: ReportScreen? = null
+        override fun onCreateScreen(intent: Intent): Screen = ReportScreen(carContext).also { screen = it }
+        override fun onNewIntent(intent: Intent) { screen?.newReport() }
     }
 }
 
-/** The car screen: a map of nearby hazards with Flag hazard and Listen buttons. */
-@Suppress("DEPRECATION") // PlaceListMapTemplate works on every Android Auto version, unlike its replacement.
-class HazardScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
+/** The car screen: "Reporting a hazard, saving in 5 s" with Save now / Cancel, then "Report saved". */
+class ReportScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
     private val handler = Handler(Looper.getMainLooper())
-    private var lastDraw = 0L
-    private val onChange: () -> Unit = { redraw() }
-    private val tick = object : Runnable {
-        override fun run() { HazardStore.refreshAsync { handler.post { redraw() } }; handler.postDelayed(this, 30000) }
+    private var flow: ReportFlow? = null
+    private var shown: ReportFlow.State? = null
+    private var address: String? = null
+
+    init { lifecycle.addObserver(this); newReport() }
+
+    override fun onDestroy(owner: LifecycleOwner) { flow?.release() }
+
+    fun newReport() {
+        val busy = flow?.state.let { it == ReportFlow.State.COUNTING || it == ReportFlow.State.WAITING_GPS }
+        if (busy) return
+        flow?.release()
+        flow = ReportFlow(carContext) { handler.post { changed() } }.also { it.start() }
     }
 
-    init { lifecycle.addObserver(this) }
-
-    override fun onStart(owner: LifecycleOwner) { DriveService.listeners += onChange; handler.post(tick) }
-    override fun onStop(owner: LifecycleOwner) { DriveService.listeners -= onChange; handler.removeCallbacks(tick) }
-
-    // Android Auto limits how often a screen may refresh, so redraws are spaced out.
-    private fun redraw() {
-        val wait = 4000 - (System.currentTimeMillis() - lastDraw)
-        if (wait <= 0) { lastDraw = System.currentTimeMillis(); invalidate() }
-        else { handler.removeCallbacks(redrawLater); handler.postDelayed(redrawLater, wait) }
-    }
-    private val redrawLater = Runnable { lastDraw = System.currentTimeMillis(); invalidate() }
-
-    private fun granted() = carContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    @SuppressLint("MissingPermission")
-    private fun here(): Location? = DriveService.instance?.location ?: if (!granted()) null else {
-        val lm = carContext.getSystemService(LocationManager::class.java)
-        listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).mapNotNull { try { lm.getLastKnownLocation(it) } catch (e: Exception) { null } }.maxByOrNull { it.time }
+    // Android Auto limits how often a screen may change, so it redraws only when the step changes
+    // (and once more when the street address arrives), not every second of the countdown.
+    private fun changed() {
+        val f = flow ?: return
+        if (f.state != shown || f.report.address != address) { shown = f.state; address = f.report.address; invalidate() }
     }
 
     override fun onGetTemplate(): Template {
-        val service = DriveService.instance
-        val loc = here()
-        val list = ItemList.Builder()
-        val near = HazardStore.hazards.filter { it.active }
-            .map { it to (if (loc != null) Geo.distance(loc.latitude, loc.longitude, it.lat, it.lng) else 0.0) }
-            .sortedBy { it.second }.take(6)
-        if (near.isEmpty()) list.setNoItemsMessage(if (HazardStore.lastError != null) "Can't reach the server" else "No hazards flagged nearby")
-        for ((h, d) in near) {
-            val dist = if (loc == null) "" else if (d < 1000) "${Math.round(d / 10) * 10} m" else String.format("%.1f km", d / 1000)
-            list.addItem(Row.Builder()
-                .setTitle(Geo.typeEs(h.type))
-                .addText(listOf(dist, "${h.reporters} driver${if (h.reporters == 1) "" else "s"}").filter { it.isNotEmpty() }.joinToString(" · "))
-                .setMetadata(Metadata.Builder().setPlace(Place.Builder(CarLocation.create(h.lat, h.lng)).setMarker(PlaceMarker.Builder().build()).build()).build())
-                .build())
+        val f = flow!!
+        val r = f.report
+        val message = when (f.state) {
+            ReportFlow.State.SAVED -> "Reporte guardado en el teléfono\n" + (r.address ?: r.lat?.let { String.format(Locale.US, "%.5f, %.5f", it, r.lng) } ?: "Sin ubicación")
+            ReportFlow.State.CANCELLED -> "Reporte cancelado"
+            ReportFlow.State.WAITING_GPS -> "Esperando la ubicación GPS…"
+            else -> "Reportando hoyo. Se guarda en 5 segundos."
         }
-        val flag = Action.Builder().setTitle(if (service?.flagging == true) "Save now" else "Flag hazard").setOnClickListener { flag() }.build()
-        val listen = Action.Builder().setTitle(if (service != null) "Stop" else "Drive").setOnClickListener { toggleDrive() }.build()
-        val title = when {
-            service?.flagging == true -> "Saving hazard in 5 s"
-            service != null -> service.status
-            else -> "OIOIOI"
-        }
-        return PlaceListMapTemplate.Builder()
-            .setTitle(title)
-            .setHeaderAction(Action.APP_ICON)
-            .setItemList(list.build())
-            .setCurrentLocationEnabled(granted())
-            .setActionStrip(ActionStrip.Builder().addAction(flag).addAction(listen).build())
-            .build()
-    }
-
-    private fun flag() {
-        val service = DriveService.instance
-        if (service != null) { service.flag(); return }
-        // Not in Drive mode: save straight away at the last known position.
-        val loc = here() ?: run { CarToast.makeText(carContext, "No location yet", CarToast.LENGTH_LONG).show(); return }
-        CarToast.makeText(carContext, "Hazard flagged", CarToast.LENGTH_SHORT).show()
-        Api.io.execute {
-            try {
-                val n = HazardStore.nearestActive(loc.latitude, loc.longitude)
-                if (n != null && n.second <= 25) Api.confirm(carContext, n.first.id)
-                else Api.flag(carContext, loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy else null, if (loc.hasBearing()) loc.bearing else null)
-                HazardStore.refresh()
-                handler.post { redraw() }
-            } catch (e: Exception) {
-                handler.post { CarToast.makeText(carContext, "Could not save: no connection", CarToast.LENGTH_LONG).show() }
+        val b = MessageTemplate.Builder(message).setTitle("OIOIOI").setHeaderAction(Action.APP_ICON)
+        when (f.state) {
+            ReportFlow.State.SAVED, ReportFlow.State.CANCELLED ->
+                b.addAction(Action.Builder().setTitle("Nuevo reporte").setOnClickListener { newReport() }.build())
+            else -> {
+                b.addAction(Action.Builder().setTitle("Guardar").setOnClickListener { f.saveNow() }.build())
+                b.addAction(Action.Builder().setTitle("Cancelar").setOnClickListener { f.cancel() }.build())
             }
         }
-    }
-
-    private fun toggleDrive() {
-        if (DriveService.instance != null) { DriveService.stop(carContext); return }
-        val prefs = carContext.getSharedPreferences("oioioi", 0)
-        try { DriveService.start(carContext, prefs.getString("settings", null) ?: JSONObject().toString()) }
-        catch (e: Exception) { CarToast.makeText(carContext, "Open OIOIOI on the phone and tap Drive", CarToast.LENGTH_LONG).show() }
+        return b.build()
     }
 }

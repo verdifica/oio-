@@ -16,10 +16,13 @@
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="false">
 
+        <!-- Opening the app starts a report. -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ReportActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -27,12 +30,26 @@
             </intent-filter>
         </activity>
 
+        <!-- The earlier shared-map version (web app + Drive mode). Not linked from the app for now. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".DriveService"
             android:exported="false"
             android:foregroundServiceType="microphone|location" />
 
-        <!-- Android Auto: a "points of interest" app showing nearby hazards with a Flag hazard button. -->
+        <!-- Android Auto: opening OIOIOI on the car screen starts a report. Listed as a "points of interest" app. -->
         <service
             android:name=".car.OioiCarAppService"
             android:exported="true">
