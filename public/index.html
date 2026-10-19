@@ -232,7 +232,9 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('oioioi.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('oioioi.' + k, JSON.stringify(v)); } catch {} },
 };
-let uid = store.get('uid');
+// Inside the Android app, Drive mode runs natively (it keeps listening with the screen off) and the id is shared with it.
+const native = window.OioiNative || null;
+let uid = native ? native.uid() : store.get('uid');
 if (!uid) { uid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); store.set('uid', uid); }
 
 // ---------- helpers ----------
@@ -669,7 +671,23 @@ function stopListening() {
   $('listenBtn').classList.remove('active'); $('listenBtn').setAttribute('aria-pressed', 'false'); $('listenBtn').textContent = 'Drive';
   $('micChip').classList.remove('on'); $('micText').textContent = 'Mic off';
 }
-$('listenBtn').onclick = () => (listening ? stopListening() : startListening());
+$('listenBtn').onclick = () => {
+  if (!native) return listening ? stopListening() : startListening();
+  if (native.isDriving()) native.stopDrive();
+  else {
+    if (stopTest) toggleTest();
+    native.startDrive(JSON.stringify({ mode: store.get('mode', 'voice') === 'none' ? 'none' : 'voice', word: store.get('voiceWord', 'oioioi'), count: store.get('oiCount', 3), wheel: store.get('wheel', false) }));
+  }
+};
+// Called by the Android app whenever its Drive mode changes.
+window.onNativeDrive = (st) => {
+  listening = st.driving;
+  $('listenBtn').classList.toggle('active', st.driving); $('listenBtn').setAttribute('aria-pressed', String(st.driving)); $('listenBtn').textContent = st.driving ? 'Stop' : 'Drive';
+  $('micChip').classList.toggle('on', st.driving); $('micChip').classList.toggle('hot', st.flagging);
+  $('micText').textContent = st.flagging ? 'Flagging…' : st.driving ? st.status : 'Mic off';
+  if (st.driving) startGps();
+  refresh();
+};
 
 // ---------- profile + report ----------
 const P_FIELDS = ['name', 'license', 'address', 'make', 'model', 'year', 'plate'];

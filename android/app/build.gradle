@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'org.oioioi.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.oioioi.app'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1'
+        buildConfigField 'String', 'SERVER', '"https://oioioi-uta4.onrender.com/"'
+    }
+    signingConfigs {
+        // A fixed key in the repo, so every build installs over the previous one. Prototype only.
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.debug }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/voskAssets'))
+}
+
+// The Spanish speech model is the same file the web app uses. It is unpacked into the app's assets at build time.
+def modelTar = file("$rootDir/../public/vendor/vosk/model-es.tar.gz")
+def modelAssets = layout.buildDirectory.dir('generated/voskAssets')
+tasks.register('unpackVoskModel', Copy) {
+    from(tarTree(resources.gzip(modelTar))) {
+        eachFile { it.path = it.path.replaceFirst('^vosk-model-small-es-0\\.3/', 'model-es/') }
+    }
+    includeEmptyDirs = false
+    into modelAssets
+    doLast { new File(modelAssets.get().asFile, 'model-es/uuid').text = 'vosk-model-small-es-0.3' }
+}
+preBuild.dependsOn 'unpackVoskModel'
+
+dependencies {
+    implementation 'androidx.car.app:app:1.4.0'
+    implementation 'androidx.lifecycle:lifecycle-common:2.6.2'
+    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+}

@@ -1,0 +1,37 @@
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', 'public/vendor/vosk/model-es.tar.gz', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build the APK
+        run: gradle -p android assembleDebug --stacktrace
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk oioioi.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oioioi-apk
+          path: oioioi.apk
+      # A fixed download link for the phone: .../releases/download/android-latest/oioioi.apk
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest oioioi.apk --prerelease --title "OIOIOI Android (latest test build)" --notes "Test build from ${GITHUB_SHA::7}. Install on the phone, then enable unknown sources in Android Auto developer settings to see it in the car."
