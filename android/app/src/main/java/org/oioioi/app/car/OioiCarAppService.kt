@@ -17,7 +17,7 @@ import androidx.lifecycle.LifecycleOwner
 import org.oioioi.app.ReportFlow
 import java.util.Locale
 
-/** Android Auto entry point. Opening OIOIOI on the car screen ("Hey Google, open Reportar Hoyo") starts a report. */
+/** Android Auto entry point. Opening OIOIOI on the car screen ("Hey Google, abre Hoyo Hoyo") starts a report. */
 class OioiCarAppService : CarAppService() {
     override fun createHostValidator(): HostValidator =
         // Test builds accept any Android Auto host (needed for sideloading with developer mode).

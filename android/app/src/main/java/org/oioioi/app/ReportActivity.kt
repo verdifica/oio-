@@ -31,7 +31,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The app's main screen. Opening the app ("Hey Google, open Reportar Hoyo") starts a report right away;
+ * The app's main screen. Opening the app ("Hey Google, abre Hoyo Hoyo") starts a report right away;
  * it saves itself after 5 seconds unless the driver cancels. Reports stay on the phone.
  */
 class ReportActivity : Activity() {
@@ -163,7 +163,7 @@ class ReportActivity : Activity() {
     private fun renderList() {
         val list = ReportStore.all(this)
         title("Mis reportes")
-        add(text("Di \"Hey Google, abre Reportar Hoyo\" para reportar un hoyo. / Say \"Hey Google, open Pothole Report\" to report a hazard.", 14f, muted))
+        add(text("Di \"Hey Google, abre Hoyo Hoyo\" para reportar un hoyo. / Say \"Hey Google, open Hoyo Hoyo\" to report a hazard.", 14f, muted))
         add(button("Nuevo reporte / New report", red, Color.WHITE) { startReport() })
         if (list.isEmpty()) add(text("Todavía no hay reportes. / No reports yet.", 16f, Color.WHITE).apply { setPadding(0, dp(16), 0, dp(16)) })
         val fmt = SimpleDateFormat("d MMM yyyy, h:mm a", Locale("es", "PR"))
