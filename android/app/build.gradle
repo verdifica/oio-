@@ -83,4 +83,5 @@ dependencies {
     phoneImplementation 'com.alphacephei:vosk-android:0.3.47@aar'
     phoneImplementation 'net.java.dev.jna:jna:5.13.0@aar'
     carImplementation 'androidx.car.app:app-automotive:1.4.0'
+    carImplementation 'androidx.fragment:fragment:1.6.2' // CarAppActivity's base class
 }
